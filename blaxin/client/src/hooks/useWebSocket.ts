@@ -253,6 +253,14 @@ export function useWebSocket() {
               }
               break;
 
+            case 'journal-updated':
+              // Real mission journal: the server's bounded record of what
+              // actually ran (COMMAND → ACTION → OBSERVATION → RESULT).
+              if (data && Array.isArray(data.entries)) {
+                useAppStore.getState().setJournal(data.entries);
+              }
+              break;
+
             case 'jarvis-state':
               // The Jarvis engine's real phase/directive/report snapshot.
               if (data && typeof data.phase === 'string') {

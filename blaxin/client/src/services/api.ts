@@ -64,6 +64,37 @@ export interface MetricsResponse {
   tasks: MetricsTask[];
 }
 
+// ── Mission journal (§20): the real record of what ran ────────
+
+export type JournalStatus =
+  | 'INFO' | 'RUNNING' | 'COMPLETED' | 'FAILED' | 'SKIPPED'
+  | 'BLOCKED' | 'RECOVERING' | 'RECOVERED' | 'UNVERIFIED';
+
+export type JournalKind =
+  | 'COMMAND' | 'ROUTER' | 'PLAN' | 'ACTION' | 'OBSERVATION'
+  | 'VERIFICATION' | 'RECOVERY' | 'MEMORY' | 'RESULT';
+
+export interface JournalEntry {
+  id: string;
+  seq: number;
+  at: number;
+  kind: JournalKind;
+  status: JournalStatus;
+  objective?: string;
+  missionId?: string;
+  taskId?: string;
+  actionId?: string;
+  specialist?: string;
+  intent?: string;
+  action?: string;
+  observation?: string;
+  verification?: { method: string; status: string; detail: string };
+  retries?: number;
+  failure?: string;
+  recovery?: string;
+  detail?: string;
+}
+
 // ── Live system telemetry ─────────────────────────────────────
 
 export interface SystemTelemetry {
@@ -448,6 +479,11 @@ export const api = {
 
   // Diagnostics
   diagnostics: () => fetchAPI<any>('/diagnostics'),
+
+  // Mission journal (§20)
+  getJournal: (limit?: number) =>
+    fetchAPI<{ entries: JournalEntry[] }>(`/journal?limit=${limit ?? 200}`),
+  clearJournal: () => fetchAPI<{ success: boolean }>('/journal', { method: 'DELETE' }),
 
   // Live system telemetry
   getSystemTelemetry: () => fetchAPI<SystemTelemetry>('/system/telemetry'),

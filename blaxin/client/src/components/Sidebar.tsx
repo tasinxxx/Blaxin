@@ -3,13 +3,14 @@ import { useAppStore } from '../utils/store';
 import {
   FiMessageSquare, FiSettings, FiCpu, FiPower,
   FiTerminal, FiMonitor, FiShield, FiInfo,
-  FiActivity, FiHeart, FiBarChart2, FiLink, FiDatabase,
+  FiActivity, FiHeart, FiBarChart2, FiLink, FiDatabase, FiList,
 } from 'react-icons/fi';
 
 const navItems = [
   { id: 'chat', icon: FiMessageSquare, label: 'Chat' },
   { id: 'terminal', icon: FiTerminal, label: 'Terminal' },
   { id: 'metrics', icon: FiBarChart2, label: 'Metrics' },
+  { id: 'journal', icon: FiList, label: 'Journal' },
   { id: 'diagnostics', icon: FiHeart, label: 'Diagnostics' },
   { id: 'system', icon: FiMonitor, label: 'System' },
   { id: 'memory', icon: FiDatabase, label: 'Memory' },

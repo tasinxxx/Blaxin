@@ -13,6 +13,7 @@ import { BrainPage } from './pages/BrainPage';
 import { ModelsPage } from './pages/ModelsPage';
 import { SystemPage } from './pages/SystemPage';
 import { MemoryPage } from './pages/MemoryPage';
+import { JournalPage } from './pages/JournalPage';
 import { SetupWizard } from './components/SetupWizard';
 import { UpdateNotifier } from './components/UpdateNotifier';
 import { useAppStore } from './utils/store';
@@ -147,6 +148,10 @@ export default function App() {
 
         {currentPage === 'memory' && (
           <MemoryPage />
+        )}
+
+        {currentPage === 'journal' && (
+          <JournalPage />
         )}
       </main>
 

@@ -50,6 +50,7 @@ import { createInfrastructureRouter } from './api/infrastructure.js';
 import { TaskQueue } from './utils/task-queue.js';
 import { MissionStore } from './utils/missions.js';
 import { securityLog } from './utils/security-log.js';
+import { missionJournal } from './utils/mission-journal.js';
 import { JarvisScheduler } from './utils/scheduler.js';
 import { classifyCommand, commandHelpText } from './router/commands.js';
 import { createJarvisHost } from './jarvis/host.js';
@@ -103,6 +104,11 @@ onAgentEvent((event, data) => {
     case 'queue-updated':          agency.onQueueUpdated(data?.tasks ?? []); break;
   }
 });
+
+// ── Mission journal (§20) — the honest record of what really ran ──
+// Bounded + persisted; every line is derived from a real runtime event.
+missionJournal.onChange((entries) => broadcast('journal-updated', { entries }));
+onAgentEvent((event, data) => missionJournal.ingest(event, data));
 
 /** Broadcast AND feed every hub subscriber (single source of truth). */
 function emitAll(event: string, data: unknown): void {
@@ -802,6 +808,17 @@ app.get('/api/security/events', (req, res) => {
   res.json({ events: securityLog.list(Number.isFinite(limit) ? limit : 50) });
 });
 
+// ── Mission journal (§20): real mission/action history ────────
+app.get('/api/journal', (req, res) => {
+  const limit = parseInt(String(req.query.limit || '200'), 10);
+  res.json({ entries: missionJournal.list(Number.isFinite(limit) ? limit : 200) });
+});
+
+app.delete('/api/journal', (_req, res) => {
+  missionJournal.clear();
+  res.json({ success: true });
+});
+
 app.get('/api/status', (_req, res) => {
   const providerStatus = providers.getStatus();
   const keysConfigured = providerStatus.filter((p: any) => p.hasKey).length;
@@ -1167,6 +1184,8 @@ wss.on('connection', (ws) => {
   ws.send(JSON.stringify({ event: 'queue-updated', data: { tasks: queue.list() } }));
   ws.send(JSON.stringify({ event: 'mission-progress', data: { missions: missions.list() } }));
   ws.send(JSON.stringify({ event: 'security-events', data: { events: securityLog.list(50) } }));
+  // Journal snapshot: the real mission/action history at connect time.
+  ws.send(JSON.stringify({ event: 'journal-updated', data: { entries: missionJournal.list(200) } }));
   // Jarvis snapshot: phase + last honest report (never stale HUD state).
   ws.send(JSON.stringify({ event: 'jarvis-state', data: jarvisHost.snapshot() }));
   // Agency snapshot: the real worker roster at connect time.

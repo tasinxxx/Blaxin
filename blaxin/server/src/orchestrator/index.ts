@@ -935,6 +935,17 @@ export class AgentOrchestrator {
       } catch (e: any) {
         logger.warn('orchestrator', `Layered memory recording failed: ${e?.message ?? e}`);
       }
+      // The action really ran and really failed: publish the honest settled
+      // state BEFORE the rollback erases the attempt, so the journal and the
+      // agency registry can never show a stale RUNNING action.
+      this.emit('tool-execution', {
+        toolName: action.tool,
+        args: action.args,
+        state: 'failed',
+        error: result.error?.slice(0, 400),
+        verification: result.data?.verification,
+        stepId: pc.step.id,
+      });
       // Failed deterministic action: roll back this attempt entirely and
       // let the LLM loop diagnose/recover (it may explain or adapt).
       this.rollbackDirect(historyMark);
@@ -1578,6 +1589,11 @@ export class AgentOrchestrator {
       args,
       state: step.state,
       result: result.output?.slice(0, 500),
+      error: result.error?.slice(0, 400),
+      // REAL verification evidence, passed through verbatim when the tool
+      // produced one (browser/computer-control/clipboard/screenshot) — the
+      // journal and HUD record HOW the outcome was verified, never a claim.
+      verification: result.data?.verification,
       stepId: step.id,
     });
     if (this.currentPlan && this.currentTask) {

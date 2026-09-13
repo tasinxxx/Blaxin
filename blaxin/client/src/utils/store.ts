@@ -1,5 +1,5 @@
 import { create } from 'zustand';
-import type { BrainStatusResponse } from '../services/api';
+import type { BrainStatusResponse, JournalEntry } from '../services/api';
 
 export type AgentState = 'idle' | 'thinking' | 'planning' | 'executing' | 'observing' | 'waiting' | 'completed' | 'error' | 'requires-confirmation';
 
@@ -309,6 +309,10 @@ interface AppState {
   activityFeed: ActivityLine[];
   addActivityLine: (line: ActivityLine) => void;
   clearActivityFeed: () => void;
+
+  // Mission journal (§20) — server-derived real runtime history.
+  journal: JournalEntry[];
+  setJournal: (entries: JournalEntry[]) => void;
   bootComplete: boolean;
   setBootComplete: (complete: boolean) => void;
   deviceId: string | null;
@@ -427,6 +431,9 @@ export const useAppStore = create<AppState>((set) => ({
     activityFeed: [...s.activityFeed.slice(-200), line],
   })),
   clearActivityFeed: () => set({ activityFeed: [] }),
+
+  journal: [],
+  setJournal: (entries) => set({ journal: entries.slice(0, 400) }),
   bootComplete: false,
   setBootComplete: (complete) => set({ bootComplete: complete }),
   deviceId: null,
