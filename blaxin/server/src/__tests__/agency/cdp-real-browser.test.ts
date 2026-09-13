@@ -11,6 +11,7 @@
 
 import { describe, it, expect, afterAll } from 'vitest';
 import { execFile } from 'child_process';
+import { createServer } from 'http';
 
 const REAL = !!process.env.BLAXIN_REAL_CHROME;
 const d = REAL ? describe : describe.skip;
@@ -48,6 +49,36 @@ async function launchHeadlessChrome(): Promise<void> {
     }
   }
   throw new Error('No Chromium/Chrome with CDP could be started');
+}
+
+/**
+ * Tiny loopback server for REAL navigations (no external network): two
+ * distinct pages give genuine history entries and clean URL matching.
+ */
+function startLoopbackServer(): Promise<{ port: number; close: () => Promise<void> }> {
+  const server = createServer((req, res) => {
+    const isB = (req.url || '/').startsWith('/b');
+    res.writeHead(200, { 'Content-Type': 'text/html' });
+    res.end(isB
+      ? '<html><head><title>Page B</title></head><body><h1>B</h1></body></html>'
+      : '<html><head><title>Page A</title></head><body><h1>A</h1></body></html>');
+  });
+  return new Promise((resolve) => {
+    server.listen(0, '127.0.0.1', () => {
+      const addr = server.address();
+      const port = typeof addr === 'object' && addr ? addr.port : 0;
+      resolve({
+        port,
+        close: () => new Promise<void>((r) => {
+          // Chrome holds keep-alive sockets: close() alone would wait for
+          // them. Force them shut, and never let teardown hang the test.
+          server.closeAllConnections?.();
+          server.close(() => r());
+          setTimeout(r, 1000);
+        }),
+      });
+    });
+  });
 }
 
 const PAGE_WITH_LINKS = 'data:text/html,' + encodeURIComponent(`
@@ -130,4 +161,52 @@ d('real Chromium CDP (BLAXIN_REAL_CHROME=1)', () => {
     const pb = await verifyPlayback(cdp, 800);
     expect(pb.playing).toBe(false);
   }, 20_000);
+
+  it('real session control: back/forward/refresh observe REAL history + document (§6)', async () => {
+    const server = await startLoopbackServer();
+    try {
+      const { BrowserSession } = await import('../../tools/browser-session.js');
+      const { BrowserTool } = await import('../../tools/browser.js');
+      const session = new BrowserSession();
+      const tool = new BrowserTool(session, { navVerifyMs: 5000, reloadVerifyMs: 6000 });
+
+      const a = `http://127.0.0.1:${server.port}/a`;
+      const b = `http://127.0.0.1:${server.port}/b`;
+      expect((await tool.execute({ action: 'open_url', url: a })).success).toBe(true);
+      expect((await tool.execute({ action: 'open_url', url: b })).success).toBe(true);
+
+      // Real reads from the real page.
+      const cur = await tool.execute({ action: 'current_url' });
+      expect(cur.success).toBe(true);
+      expect(String((cur.data as { url: string }).url)).toContain('/b');
+      const title = await tool.execute({ action: 'page_title' });
+      expect(title.success).toBe(true);
+      expect(String((title.data as { title: string }).title)).toContain('Page B');
+
+      // back → the REAL previous entry; index AND URL verified.
+      const back = await tool.execute({ action: 'back' });
+      expect(back.success).toBe(true);
+      expect(String(back.output)).toContain('history index');
+      const afterBack = await tool.execute({ action: 'current_url' });
+      expect(String((afterBack.data as { url: string }).url)).toContain('/a');
+
+      // forward → back to the real next entry.
+      const forward = await tool.execute({ action: 'forward' });
+      expect(forward.success).toBe(true);
+      const afterForward = await tool.execute({ action: 'current_url' });
+      expect(String((afterForward.data as { url: string }).url)).toContain('/b');
+
+      // refresh → the document REALLY reloaded (pre-reload marker cleared).
+      const refresh = await tool.execute({ action: 'refresh' });
+      expect(refresh.success).toBe(true);
+      expect(String(refresh.output)).toContain('fresh document observed');
+
+      // list_tabs → the REAL page-target list.
+      const tabs = await tool.execute({ action: 'list_tabs' });
+      expect(tabs.success).toBe(true);
+      expect((tabs.data as { tabs: unknown[] }).tabs.length).toBeGreaterThanOrEqual(1);
+    } finally {
+      await server.close();
+    }
+  }, 60_000);
 }, 60_000);

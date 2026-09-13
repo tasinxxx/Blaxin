@@ -1,5 +1,42 @@
 # BLAXIN Engineering Mission — Continuation State
 
+## SESSION — REAL-CHROME PROOF FOR THE NEW SESSION ACTIONS (2026-09-13, PART 12)
+
+Closed the honest gap Part 10 documented ("unit-verified against a stateful
+fake page; no real-browser run") — the new browser session actions are now
+verified against a REAL headless Chromium over the real CDP.
+
+### What changed
+- `__tests__/agency/cdp-real-browser.test.ts` (+1 test, still env-gated by
+  `BLAXIN_REAL_CHROME=1` so normal runs skip it): a tiny LOOPBACK http
+  server serves two real pages, then the real `BrowserTool`+`BrowserSession`
+  drive: `open_url` /a → `open_url` /b → `current_url` + `page_title` real
+  reads → **`back`** (real history index + URL verified, lands on /a) →
+  **`forward`** (back to /b) → **`refresh`** (real document replacement
+  verified by marker clearance) → **`list_tabs`** (real page-target list).
+- Test-infra gotcha found + fixed: Node's `server.close()` waits for
+  keep-alive sockets, and Chrome holds them — teardown hung the test for
+  the full 60s timeout. The loopback server now calls
+  `closeAllConnections()` and is bounded by a safety timer.
+
+### Verification this phase (evidence, no claims)
+- **REAL-Chrome suite executed on this machine**:
+  `BLAXIN_REAL_CHROME=1 npx vitest run src/__tests__/agency/cdp-real-browser.test.ts`
+  → **6/6 PASS in 3.8s** (launch+attach, ground→click→verify, scroll,
+  honest playback, and the new real session-control test in 340ms).
+- FULL server suite: **636 passed / 7 skipped / 0 failed** (the extra skip
+  is the new env-gated real-Chrome test).
+- Server `tsc --noEmit` clean.
+
+### NEXT EXACT ACTION
+1. §20 activity journal: give the typed HUD lines an honest `status` where
+   the underlying event carries one (the COMMAND/ROUTER/RECOVERY/MEMORY/
+   SKILLS lines already exist from real events).
+2. Voice (§18) physical verification remains environment-blocked.
+3. v1.4.0 tag still pending after the remaining agreed scope is verified.
+
+---
+
 ## SESSION — JARVIS RUNTIME STATE REFLECTION (2026-09-13, PART 11, SAME SESSION)
 
 Continued straight on from Part 10 (commit **02aeb47**, pushed). Next
@@ -54,8 +91,8 @@ idle); runtime phases still settle through reporting to idle.
 - Client `tsc -b` + `vite build` clean (4.6s).
 
 ### NEXT EXACT ACTION
-1. Env-gated real-Chrome assertions for the new browser session actions
-   (back/forward/refresh) in `cdp-real-browser.test.ts`.
+1. DONE in Part 12 (entry above): env-gated real-Chrome assertions for
+   back/forward/refresh now run 6/6 against a real headless Chromium.
 2. §20 activity journal: the feed already receives COMMAND/ROUTER/
    RECOVERY/MEMORY/SKILLS lines; next is giving the typed lines an honest
    `status` where the underlying event carries one.
@@ -158,10 +195,9 @@ honestly (DETERMINISTIC / AI BRAIN / HYBRID)" was also only binary
   regression from the JarvisPanel metrics change.
 
 ### Honest remaining gaps
-- The new browser actions are unit-verified against a stateful fake page
-  and compile clean; a REAL-Chrome CDP run of back/forward/refresh has NOT
-  been executed this session (no display-bound run). The env-gated
-  real-Chrome suite currently covers open/click/scroll/playback only.
+- CLOSED in Part 12: `cdp-real-browser.test.ts` now drives the real
+  back/forward/refresh/current_url/page_title/list_tabs actions against a
+  real headless Chromium (6/6, 3.8s) using a loopback server.
 - Voice physical verification and live-LLM round trips remain
   environment-blocked as before.
 
