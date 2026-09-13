@@ -239,6 +239,66 @@ describe('Jarvis phases', () => {
   });
 });
 
+describe('Jarvis runtime state reflection (§5)', () => {
+  it('real agent states drive the phase while the directive executes', () => {
+    const { engine, emit } = makeEngine();
+    engine.receiveCommand({ message: 'Do a long thing', source: 'text' });
+
+    emit('agent-state', { state: 'planning' });
+    expect(engine.snapshot().phase).toBe('planning');
+    emit('agent-state', { state: 'thinking' });
+    expect(engine.snapshot().phase).toBe('thinking');
+    emit('agent-state', { state: 'executing' });
+    expect(engine.snapshot().phase).toBe('executing');
+    emit('agent-state', { state: 'observing' });
+    expect(engine.snapshot().phase).toBe('observing');
+    emit('agent-state', { state: 'waiting' });
+    expect(engine.snapshot().phase).toBe('waiting');
+  });
+
+  it('a real confirmation gate reports BLOCKED', () => {
+    const { engine, emit } = makeEngine();
+    engine.receiveCommand({ message: 'Delete the file', source: 'text' });
+    emit('confirmation-required', { stepId: 'c1', description: 'Execute terminal: rm x' });
+    expect(engine.snapshot().phase).toBe('blocked');
+  });
+
+  it('a real retry reports RECOVERING', () => {
+    const { engine, emit } = makeEngine();
+    engine.receiveCommand({ message: 'Open the site', source: 'text' });
+    emit('tool-execution', { toolName: 'browser', state: 'executing', stepId: 's1' });
+    emit('tool-execution', { toolName: 'browser', state: 'retrying', stepId: 's1' });
+    expect(engine.snapshot().phase).toBe('recovering');
+  });
+
+  it('a real browser session desync reports RECOVERING', () => {
+    const { engine, emit } = makeEngine();
+    engine.receiveCommand({ message: 'Open the site', source: 'text' });
+    emit('browser-session', { event: { type: 'session-desync', detail: 'target vanished' } });
+    expect(engine.snapshot().phase).toBe('recovering');
+  });
+
+  it('real events never move the phase when no directive is active', () => {
+    const { engine, emit } = makeEngine();
+    emit('agent-state', { state: 'planning' });
+    emit('agent-state', { state: 'executing' });
+    emit('confirmation-required', { stepId: 'c1' });
+    emit('tool-execution', { toolName: 'browser', state: 'retrying' });
+    emit('browser-session', { event: { type: 'session-desync' } });
+    expect(engine.snapshot().phase).toBe('idle');
+  });
+
+  it('runtime phases still settle to idle through reporting after a real terminal state', () => {
+    const { engine, emit, snapshots } = makeEngine();
+    engine.receiveCommand({ message: 'Do a long thing', source: 'text' });
+    runStandardTask(emit, { terminal: 'completed' });
+    const phases = snapshots.map((s) => s.phase);
+    expect(phases).toContain('planning');
+    expect(phases).toContain('reporting');
+    expect(phases[phases.length - 1]).toBe('idle');
+  });
+});
+
 describe('Jarvis mission-routed reporting', () => {
   function makeMission(id: string, status: string, stepStates: Array<[string, string]>) {
     return {

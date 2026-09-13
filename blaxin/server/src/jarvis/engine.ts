@@ -249,9 +249,43 @@ export class JarvisEngine {
         break;
     }
 
+    // ── Real runtime reflection (§5) ─────────────────────────────
+    // While a directive of OURS is executing, the agent's ACTUAL state
+    // drives the Jarvis phase. Every transition below comes from a real
+    // event; nothing is animated independently of the task engine.
+    if (this.activeDirective) {
+      if (event === 'agent-state') {
+        const mapped = this.runtimePhaseFor(String(data?.state ?? ''));
+        if (mapped) this.setPhase(mapped);
+      } else if (event === 'confirmation-required') {
+        // The run is genuinely BLOCKED on user authorization.
+        this.setPhase('blocked');
+      } else if (event === 'tool-execution' && data?.state === 'retrying') {
+        this.setPhase('recovering');
+      } else if (event === 'browser-session') {
+        // A real browser desync puts the run into RECOVERING (the session
+        // layer then reconnects/reacquires). Recovery is never a success
+        // claim — the next real event advances the phase.
+        if (data?.event?.type === 'session-desync') this.setPhase('recovering');
+      }
+    }
+
     // Terminal agent-state is remembered, not reported on yet.
     if (event === 'agent-state' && data?.state && ['completed', 'error', 'idle'].includes(data.state)) {
       this.pendingTerminalState = data.state;
+    }
+  }
+
+  /** Real agent runtime state → Jarvis runtime phase (null = not a phase). */
+  private runtimePhaseFor(state: string): JarvisPhase | null {
+    switch (state) {
+      case 'planning': return 'planning';
+      case 'thinking': return 'thinking';
+      case 'executing': return 'executing';
+      case 'observing': return 'observing';
+      case 'waiting': return 'waiting';
+      case 'requires-confirmation': return 'blocked';
+      default: return null;
     }
   }
 

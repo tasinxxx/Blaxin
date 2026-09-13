@@ -1,5 +1,68 @@
 # BLAXIN Engineering Mission — Continuation State
 
+## SESSION — JARVIS RUNTIME STATE REFLECTION (2026-09-13, PART 11, SAME SESSION)
+
+Continued straight on from Part 10 (commit **02aeb47**, pushed). Next
+incomplete item in the completion matrix: **§5 — the JARVIS state machine**.
+Jarvis had only 5 executive phases (idle/understanding/routing/delegated/
+reporting) and sat static on "DELEGATED TO AGENT" for the whole task even
+while the agent was really planning/thinking/executing/observing, so the
+executive state did not reflect the live runtime.
+
+### What changed
+- `JarvisPhase` (server + client mirror) now has the real runtime phases:
+  planning, thinking, executing, observing, waiting, recovering, blocked.
+- Engine maps them from REAL events only:
+  - `agent-state` → planning / thinking / executing / observing / waiting
+    (mapped ONLY while one of OUR directives is active);
+  - `confirmation-required` → **blocked** (the run genuinely awaits user
+    authorization); `agent-state: requires-confirmation` also maps there;
+  - `tool-execution` with `state: 'retrying'` → **recovering**;
+  - `browser-session` `session-desync` → **recovering** (recovery is never
+    reported as success; the next real event advances the phase).
+- `index.ts`: the browser-session listener now routes through `emitAll`
+  (broadcast + hub subscribers) instead of `broadcast` alone — one event
+  path, so Jarvis sees the real desync. No duplicate delivery to the client.
+- Client: `JarvisPhase` type + `PHASE_LABEL` entries
+  (BLOCKED → "BLOCKED — AWAITING APPROVAL"). Runtime phases settle through
+  `reporting` → `idle` exactly as before.
+
+### Deliberate, documented non-states (honest, not omissions)
+- **LISTENING**: mic/STT state is REAL but client-side (Web Speech API);
+  the server has no signal, and inventing a server phase would be animation.
+  The client already exposes the real `voiceState`.
+- **VERIFYING**: verification-in-depth runs INSIDE each tool action before
+  it returns, so the runtime's real post-action state is `observing`;
+  per-action verification evidence travels in the tool result and the
+  report evidence. A dedicated phase would have no real signal.
+- **SUCCESS / ERROR**: carried by `AgentReport.status`
+  (SUCCESS/PARTIAL/FAILED/STOPPED), which is strictly more informative than
+  duplicating them as transient phases.
+
+### Tests (+6, 630 → 636)
+`jarvis-engine.test.ts` (22 → 28): real agent states drive the phase;
+confirmation gate → blocked; retry → recovering; browser desync →
+recovering; **no directive ⇒ real events never move the phase** (idle stays
+idle); runtime phases still settle through reporting to idle.
+
+### Verification this phase (evidence, no claims)
+- Server `tsc --noEmit` clean; FULL suite **636 passed / 6 skipped / 0
+  failed**. One run showed the DOCUMENTED load flake
+  (`brain-status-lifecycle` "clears stale errors…" 10056ms timeout) — it
+  passes **8/8 in isolation (1.8s)** and the next full run is green; this is
+  the pre-existing load-sensitivity class, not a regression.
+- Client `tsc -b` + `vite build` clean (4.6s).
+
+### NEXT EXACT ACTION
+1. Env-gated real-Chrome assertions for the new browser session actions
+   (back/forward/refresh) in `cdp-real-browser.test.ts`.
+2. §20 activity journal: the feed already receives COMMAND/ROUTER/
+   RECOVERY/MEMORY/SKILLS lines; next is giving the typed lines an honest
+   `status` where the underlying event carries one.
+3. v1.4.0 tag still pending after the remaining agreed scope is verified.
+
+---
+
 ## SESSION — DETERMINISTIC BROWSER SESSION + HONEST EXECUTION MODE (2026-09-13, PART 10)
 
 Resumed per the continuation directive: inspected FIRST (git log/status,
@@ -806,9 +869,10 @@ All items of the phase-2 plan are implemented and verified:
 - **Mission Status**: `blaxin v1.4.0` is release-READY and was verified end
   to end (server 630/6, client tsc+build, E2E 8/8, real-Chrome 5/5,
   packaged .deb runtime smoke). The larger JARVIS Command Center
-  transformation is the remaining target; the most recent increment was
+  transformation is the remaining target; the most recent increments were
   the deterministic browser session layer + honest execution-mode
-  reporting (see the top session entry).
+  reporting (Part 10) and JARVIS runtime state reflection (Part 11) — see
+  the top two session entries.
 - **v1.3.0 history (for reference)**: released and verified — CI
   built/signed/published `BLAXIN v1.3.0` (release run 34312715204,
   `success`): AppImage + .deb + sigs + sha256 + latest.json; quick-install

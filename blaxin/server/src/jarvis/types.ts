@@ -124,12 +124,38 @@ export interface AgentReport {
   };
 }
 
-/** Jarvis's own visible phase (drives the HUD; always real). */
+/**
+ * Jarvis's own visible phase (drives the HUD; always real).
+ *
+ * Two groups (§5):
+ *   executive — transitions owned by Jarvis itself (command intake,
+ *               routing, delegation, report composition)
+ *   runtime   — the REAL agent state while the directive executes; mapped
+ *               from actual orchestrator/gate/session events so the HUD
+ *               can never animate a state the engine is not really in.
+ *
+ * Deliberately absent, because no real server-side signal exists:
+ *   LISTENING — voice/mic state is client-side (real there, so the client
+ *               must not be given a fabricated server phase);
+ *   VERIFYING — verification-in-depth runs INSIDE each tool action before
+ *               it completes, so the runtime's real post-action state is
+ *               'observing'; per-action verification evidence travels in
+ *               the tool result / report evidence instead.
+ * Terminal outcomes are carried by AgentReport.status (SUCCESS/PARTIAL/
+ * FAILED/STOPPED) — strictly more informative than a duplicate phase.
+ */
 export type JarvisPhase =
   | 'idle'
   | 'understanding'
   | 'routing'
   | 'delegated'
+  | 'planning'
+  | 'thinking'
+  | 'executing'
+  | 'observing'
+  | 'waiting'
+  | 'recovering'
+  | 'blocked'
   | 'reporting';
 
 /** Snapshot broadcast on connect so the HUD never shows stale state. */

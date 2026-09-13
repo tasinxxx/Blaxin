@@ -9,11 +9,19 @@ import React from 'react';
 import { useAppStore } from '../../utils/store';
 import { Panel } from './Panel';
 
+// Executive phase + REAL runtime phases mapped from actual engine events.
 const PHASE_LABEL: Record<string, string> = {
   idle: 'IDLE',
   understanding: 'UNDERSTANDING REQUEST',
   routing: 'ROUTING',
   delegated: 'DELEGATED TO AGENT',
+  planning: 'PLANNING',
+  thinking: 'THINKING',
+  executing: 'EXECUTING',
+  observing: 'OBSERVING',
+  waiting: 'WAITING',
+  recovering: 'RECOVERING',
+  blocked: 'BLOCKED — AWAITING APPROVAL',
   reporting: 'COMPOSING REPORT',
 };
 

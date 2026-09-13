@@ -99,7 +99,11 @@ export interface SecurityEvent {
 
 // ── Jarvis layer state (real server state mirrored over the wire) ──
 
-export type JarvisPhase = 'idle' | 'understanding' | 'routing' | 'delegated' | 'reporting';
+/** Mirrors the server's JarvisPhase (§5): executive + real runtime states. */
+export type JarvisPhase =
+  | 'idle' | 'understanding' | 'routing' | 'delegated' | 'reporting'
+  | 'planning' | 'thinking' | 'executing' | 'observing' | 'waiting'
+  | 'recovering' | 'blocked';
 
 export interface JarvisDirective {
   id: string;

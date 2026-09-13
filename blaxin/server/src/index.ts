@@ -996,7 +996,9 @@ securityLog.onChange((events) => broadcast('security-events', { events }));
 // are surfaced so the HUD shows the true connection state — never a
 // fabricated healthy browser.
 browserSession.setEventListener((event) => {
-  broadcast('browser-session', { event, session: browserSession.snapshot() });
+  // Through the real event hub (broadcast + Jarvis): a desync is a real
+  // runtime transition the executive state must reflect (§5).
+  emitAll('browser-session', { event, session: browserSession.snapshot() });
 });
 
 wss.on('connection', (ws) => {
