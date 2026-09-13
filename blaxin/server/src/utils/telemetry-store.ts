@@ -41,6 +41,7 @@ const CORRUPT_BACKUP_SUFFIX = '.corrupt';
 const PERSISTED_FIELDS = [
   'taskId',
   'kind',
+  'executionMode',
   'startedAt',
   'queueWaitMs',
   'totalMs',
@@ -82,9 +83,13 @@ function sanitizeLoadedTask(value: unknown): TaskMetrics | null {
   if (typeof raw.totalMs !== 'number') return null;
 
   const tools = Array.isArray(raw.tools) ? raw.tools.filter(isToolTiming) : [];
+  const mode = raw.executionMode;
+  const executionMode =
+    mode === 'DETERMINISTIC' || mode === 'AI_BRAIN' || mode === 'HYBRID' ? mode : undefined;
   return {
     taskId: raw.taskId,
     kind: raw.kind,
+    executionMode,
     // User prompts are never persisted (see PERSISTED_FIELDS); a loaded
     // record therefore has no message. The metrics API strips it anyway.
     message: '',

@@ -89,6 +89,43 @@ describe('fast-path router: direct actions', () => {
     expect(classifyDirect('play')).toBeNull();
     expect(classifyDirect('play something')).toBeNull();
   });
+
+  it('routes browser session control deterministically (§6)', () => {
+    for (const msg of ['back', 'go back', 'go back a page', 'previous page', 'go to the previous page', 'browser back']) {
+      expect(classifyDirect(msg), msg).toMatchObject({ tool: 'browser', args: { action: 'back' } });
+    }
+    for (const msg of ['forward', 'go forward', 'go forward one page', 'go to the next page']) {
+      expect(classifyDirect(msg), msg).toMatchObject({ tool: 'browser', args: { action: 'forward' } });
+    }
+    for (const msg of ['refresh', 'reload', 'refresh the page', 'reload the tab']) {
+      expect(classifyDirect(msg), msg).toMatchObject({ tool: 'browser', args: { action: 'refresh' } });
+    }
+    for (const msg of ['new tab', 'open a new tab', 'open new tab', 'create another new tab']) {
+      expect(classifyDirect(msg), msg).toMatchObject({ tool: 'browser', args: { action: 'open_new_tab' } });
+    }
+    for (const msg of ['close tab', 'close this tab', 'close the current tab']) {
+      expect(classifyDirect(msg), msg).toMatchObject({ tool: 'browser', args: { action: 'close_tab' } });
+    }
+    for (const msg of ["what's the current url", 'current url', 'what url am i on', 'what page am i on', 'show me the url']) {
+      expect(classifyDirect(msg), msg).toMatchObject({ tool: 'browser', args: { action: 'current_url' } });
+    }
+    for (const msg of ["what's the page title", 'page title', "what's the title of this page", 'show me the page title']) {
+      expect(classifyDirect(msg), msg).toMatchObject({ tool: 'browser', args: { action: 'page_title' } });
+    }
+    for (const msg of ['list tabs', 'show me the tabs', 'show open tabs', 'what tabs are open']) {
+      expect(classifyDirect(msg), msg).toMatchObject({ tool: 'browser', args: { action: 'list_tabs' } });
+    }
+  });
+
+  it('routes "go to / navigate to <url|site>" to a deterministic navigation', () => {
+    expect(classifyDirect('go to youtube')).toMatchObject({ tool: 'browser', args: { action: 'open_url', url: 'https://youtube.com' } });
+    expect(classifyDirect('navigate to example.com')).toMatchObject({ tool: 'browser', args: { url: 'https://example.com' } });
+    expect(classifyDirect('go to https://github.com')).toMatchObject({ tool: 'browser', args: { url: 'https://github.com' } });
+    expect(classifyDirect('take me to gmail')).toMatchObject({ tool: 'browser', args: { url: 'https://mail.google.com' } });
+    expect(classifyDirect('goto wikipedia')).toMatchObject({ tool: 'browser', args: { action: 'open_url' } });
+    // An unresolvable destination is never guessed.
+    expect(classifyDirect('go to my settings page')).toBeNull();
+  });
 });
 
 describe('fast-path router: refusal to guess', () => {
@@ -103,6 +140,12 @@ describe('fast-path router: refusal to guess', () => {
       'read /definitely/not/here.txt',
       'open example.com/docs',
       'show firefox',
+      // Browser session phrases that are NOT the deterministic action.
+      "don't go back",
+      'refresh my memory',
+      'back up my files',
+      'reload the page and take a screenshot',
+      'go to my settings page',
     ]) {
       expect(classifyDirect(msg), `expected NULL for: ${msg}`).toBeNull();
     }

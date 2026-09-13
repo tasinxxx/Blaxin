@@ -17,9 +17,14 @@ export interface MetricsToolTiming {
   state: string;
 }
 
+/** Honest execution route for a task (§6). */
+export type ExecutionMode = 'DETERMINISTIC' | 'AI_BRAIN' | 'HYBRID';
+
 export interface MetricsTask {
   taskId: string;
   kind: 'direct' | 'llm';
+  /** Present on new records; legacy records predate the field. */
+  executionMode?: ExecutionMode;
   startedAt: number;
   queueWaitMs: number;
   totalMs: number;
@@ -47,6 +52,7 @@ export interface MetricsSummary {
   direct: number;
   llm: number;
   errors: number;
+  executionModes?: { DETERMINISTIC: number; AI_BRAIN: number; HYBRID: number };
   byKind: {
     direct: { count: number; medianMs: number; p95Ms: number };
     llm: { count: number; medianMs: number; p95Ms: number };

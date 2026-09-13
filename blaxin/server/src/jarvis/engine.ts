@@ -222,11 +222,18 @@ export class JarvisEngine {
         // Mission-routed directives close on mission terminal state
         // instead (each step's task-complete is mid-mission).
         if (data && typeof data === 'object') {
+          // The execution route is carried through verbatim when the
+          // orchestrator reported one — never inferred here (§6).
+          const mode = data.executionMode;
           this.completionMetrics = {
             totalMs: Number(data.totalMs ?? 0),
             modelCalls: Number(data.modelCalls ?? 0),
             toolCalls: Number(data.toolCalls ?? 0),
             kind: String(data.kind ?? 'unknown'),
+            executionMode:
+              mode === 'DETERMINISTIC' || mode === 'AI_BRAIN' || mode === 'HYBRID'
+                ? mode
+                : undefined,
           };
         }
         if (!this.isMissionDirective()) {

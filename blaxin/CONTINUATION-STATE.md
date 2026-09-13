@@ -1,5 +1,118 @@
 # BLAXIN Engineering Mission — Continuation State
 
+## SESSION — DETERMINISTIC BROWSER SESSION + HONEST EXECUTION MODE (2026-09-13, PART 10)
+
+Resumed per the continuation directive: inspected FIRST (git log/status,
+CONTINUATION-STATE, router, browser tool, orchestrator, telemetry, HUD).
+NO reset, NO revert, NO reimplementation of verified v1.4.0 work. Tree was
+clean at **abdd5bc** (only untracked `blaxin/.freebuff/`). **v1.4.0 is still
+NOT tagged** — release remains deliberately deferred to a later session.
+
+### Completion matrix — the first meaningful incomplete item (§6)
+The deterministic fast path covered open-URL / screenshot / clipboard /
+system-info / filesystem / YouTube, but NOT the directive's explicitly
+listed browser session commands: **back, forward, refresh, new tab, close
+tab, current URL, page title, list tabs** (and "go to URL" — only "open"
+was handled). Those fell through to the LLM. §6's "expose execution mode
+honestly (DETERMINISTIC / AI BRAIN / HYBRID)" was also only binary
+(`kind: direct|llm`) — the HYBRID recovery case was invisible.
+
+### 1. Real browser session actions (`tools/browser.ts`) — with verification
+- NEW actions: `back`, `forward`, `refresh`, `current_url`, `page_title`,
+  `list_tabs` (definition enum + description updated so the model can call
+  them).
+- **back/forward**: real CDP `Page.getNavigationHistory` +
+  `Page.navigateToHistoryEntry`. SUCCESS requires BOTH the landing URL
+  verified (poll) AND the REAL history index re-read to equal the target
+  index. No entry in that direction → honest FAILURE without attempting
+  navigation. UNKNOWN → the existing desync contract (reacquire +
+  re-verify). Never a blind alt+left/xdotool key event.
+- **refresh**: plants a unique window marker before `Page.reload`; a real
+  reload destroys the JS context so the marker MUST disappear. Marker
+  survives → honest FAILURE ("the document survived the reload"). No
+  baseline plantable → honest refusal ("sent" is never "done").
+- **current_url / page_title**: real `location.href` / `document.title`
+  reads with the UNKNOWN → reacquire → re-read cycle. **list_tabs**: the
+  real `/json` page-target list (no launch/navigation side effects; an
+  unreachable endpoint is an honest failure).
+- **Policy unchanged except the honest read-only carve-out**: mutating
+  actions still gate (`requiresConfirmation` true); pure observation
+  (current_url/page_title/list_tabs) does not, matching the filesystem
+  read/list convention. `riskFor()`: those three are LOW, every other
+  browser action stays MEDIUM. No confirmation gate was weakened.
+- Verification windows are injectable (`{navVerifyMs, reloadVerifyMs}`) so
+  deterministic tests stay fast; defaults 6000/8000 for real browsers.
+
+### 2. Deterministic routing (§6) — `router/direct.ts`
+- back: `back` / `go back` / `go back a page` / `previous page` / `browser back`.
+- forward: `forward` / `go forward` / `go forward one page` / `go to the next page`.
+- `refresh` / `reload` (with optional page/tab/browser/view/it).
+- `new tab` / `open a new tab` / `create another new tab`; `close tab` / `close this tab`.
+- current-url forms (`what's the current url` / `what page am i on` / `show me the url`).
+- page-title forms and tab-list forms (`list tabs` / `show open tabs` / `what tabs are open`).
+- `go to` / `goto` / `navigate to` / `take me to <url|site>` → `open_url`
+  (site aliases included); an unresolvable destination ("go to my settings
+  page") returns null → LLM, never guessed.
+- These match BEFORE the generic "open X" block, so "open a new tab" can no
+  longer be misread as launching an app named "a new tab".
+
+### 3. Honest execution mode (§6) — DETERMINISTIC / AI_BRAIN / HYBRID
+- Orchestrator tracks `directAttempted` (set only when a real fast-path
+  candidate actually ran). `executionMode()`: direct → DETERMINISTIC;
+  attempted-but-fell-through-to-LLM → HYBRID; otherwise AI_BRAIN.
+- Carried on the `task-complete` event → Jarvis report metrics → HUD
+  JarvisPanel (`…ms · N model call(s) · M tool call(s) · <route>`, with a
+  `data-testid` and a legacy fallback derived from `kind`).
+- Telemetry: `TaskMetrics.executionMode` (optional, backward compatible;
+  persisted through the existing allowlist), `executionModeOf()` derivation,
+  and summary `executionModes` counts. Legacy records still report correctly.
+- System prompt: the WEB AUTOMATION doctrine now states the browser tool
+  genuinely verifies session navigation (the old "cannot observe or verify
+  page state" line was no longer true).
+
+### 4. Tests (+21, 609 → 630)
+- NEW `__tests__/agency/browser-nav.test.ts` (14, stateful fake page):
+  back/forward success + history-index proof, start-of-history failure,
+  "URL matched but the index did not move" failure, landing failure;
+  refresh success / survived / no-baseline; current_url + page_title +
+  list_tabs real reads and unreachable-endpoint failure; confirmation
+  policy matrix.
+- `direct-router.test.ts`: +2 blocks (session-control matrix, go-to/navigate
+  resolution) and 5 new refusal cases (`don't go back`, `refresh my memory`,
+  `back up my files`, `reload the page and take a screenshot`,
+  `go to my settings page`).
+- NEW `__tests__/execution-mode.test.ts` (4): DETERMINISTIC (0 model calls),
+  AI_BRAIN, HYBRID (real fast-path failure then model recovery of the SAME
+  task), legacy derivation.
+- `risk-permission.test.ts`: read-only browser observation LOW, navigation
+  actions MEDIUM.
+
+### Verification this phase (evidence, no claims)
+- Server `tsc --noEmit` clean; FULL suite **630 passed / 6 skipped / 0
+  failed** (skips = env-gated real-Chrome/live-LLM).
+- Client `tsc -b` + `vite build` clean (4.3s).
+- E2E (real backend + vite + real Chrome): **8/8 PASS** (22.2s) — no
+  regression from the JarvisPanel metrics change.
+
+### Honest remaining gaps
+- The new browser actions are unit-verified against a stateful fake page
+  and compile clean; a REAL-Chrome CDP run of back/forward/refresh has NOT
+  been executed this session (no display-bound run). The env-gated
+  real-Chrome suite currently covers open/click/scroll/playback only.
+- Voice physical verification and live-LLM round trips remain
+  environment-blocked as before.
+
+### NEXT EXACT ACTION
+1. Add an env-gated real-Chrome assertion for back/forward/refresh to
+   `cdp-real-browser.test.ts` so the new session actions get the same
+   real-browser proof as open/click/scroll.
+2. Continue the directive: §5 unified JARVIS state machine (map real agent
+   events → PLANNING/EXECUTING/OBSERVING/VERIFYING/RECOVERING/WAITING
+   instead of only 5 jarvis phases), then §20 activity-journal typing.
+3. v1.4.0 tag still pending AFTER the remaining agreed scope is verified.
+
+---
+
 ## SESSION — TOOL VERIFICATION + PACKAGING-INTEGRITY FIX (2026-09-12, PARTS 8–9, SAME SESSION)
 
 ### Part 9 — v1.4.0 packaging smoke: STALE-BUNDLE BUG FOUND + FIXED (release-blocking)
@@ -685,11 +798,21 @@ All items of the phase-2 plan are implemented and verified:
 
 ---
 
-## CURRENT STATE
-- **Date**: 2026-09-09
+## CURRENT STATE (updated 2026-09-13)
+- **Date**: 2026-09-13
 - **Branch**: main
-- **Version**: 1.3.0 (all in-repo version sources bumped; release pending)
-- **Mission Status**: **v1.3.0 RELEASED AND VERIFIED.** Tag pushed → CI built/signed/published `BLAXIN v1.3.0` (release run 34312715204, `success`): AppImage + .deb + sigs + sha256 + latest.json. Release asset + raw-main updater manifest both verified serving version 1.3.0 with canonical tasinxxx/Blaxin URLs. Quick-install chain re-verified against the new release (v1.3.0 .deb bytes downloaded, Debian binary package header confirmed). Double-v notes cosmetic bug found in the CI commit-back and fixed (workflow line + manifest normalized on main and on the release asset). E2E workflow green in CI on every run (56s). Known-future: v1.4.0 CI rerun will exercise the fixed notes line end-to-end.
+- **Version**: 1.4.0 in every in-repo source; **NOT TAGGED/RELEASED yet**
+  (deliberate — development continues first, per the continuation directive).
+- **Mission Status**: `blaxin v1.4.0` is release-READY and was verified end
+  to end (server 630/6, client tsc+build, E2E 8/8, real-Chrome 5/5,
+  packaged .deb runtime smoke). The larger JARVIS Command Center
+  transformation is the remaining target; the most recent increment was
+  the deterministic browser session layer + honest execution-mode
+  reporting (see the top session entry).
+- **v1.3.0 history (for reference)**: released and verified — CI
+  built/signed/published `BLAXIN v1.3.0` (release run 34312715204,
+  `success`): AppImage + .deb + sigs + sha256 + latest.json; quick-install
+  chain re-verified; double-v notes cosmetic bug fixed.
 
 ## SESSION — v1.3.0 COMPLETION + BRANDING + IDENTITY (2026-09-09)
 

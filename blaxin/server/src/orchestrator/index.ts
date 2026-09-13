@@ -17,7 +17,7 @@ import { classifyDirect, DirectAction } from '../router/direct.js';
 import {
   budgetToolResultOutput, budgetAssistantMessage,
 } from '../utils/context-budget.js';
-import { telemetry, TaskMetrics } from '../utils/telemetry.js';
+import { telemetry, TaskMetrics, ExecutionMode } from '../utils/telemetry.js';
 import { SkillRegistry, SkillSelection, skillRegistry } from '../skills/registry.js';
 
 type EventCallback = (event: string, data: any) => void;
@@ -175,8 +175,12 @@ WEB AUTOMATION — use grounded actions inside the browser:
   action=verify_playback reports the real video element state).
 - If a grounded match is refused, re-run action=snapshot — the page
   changed; never guess coordinates over DOM evidence.
-- Use the legacy browser tool ONLY to launch a site for the USER to see
-  (open_url/search); it cannot observe or verify page state.
+- The browser tool also owns REAL session control with verification:
+  back / forward (real CDP history index + URL verified), refresh
+  (document replacement verified), open_new_tab / close_tab (verified
+  against the real page-target list), current_url / page_title /
+  list_tabs (real reads). Use those for navigation-level work; use
+  blaxin_web for anything INSIDE a page.
 - Screen-coordinate clicking (computer-control) inside the browser is a
   LAST RESORT, only when blaxin_web genuinely cannot ground the target.
 
@@ -291,6 +295,8 @@ export class AgentOrchestrator {
     startedAt: number;
     queueWaitMs: number;
     kind: 'direct' | 'llm';
+    /** True when a deterministic fast-path attempt ran (fell through = HYBRID). */
+    directAttempted: boolean;
     modelCalls: number;
     modelMs: number;
     waves: number;
@@ -463,6 +469,7 @@ export class AgentOrchestrator {
         startedAt: Date.now(),
         queueWaitMs,
         kind: 'llm',
+        directAttempted: false,
         modelCalls: 0,
         modelMs: 0,
         waves: 0,
@@ -520,7 +527,12 @@ export class AgentOrchestrator {
     if (config.agent.enableFastPath) {
       const action = classifyDirect(userMessage);
       if (action && this.canRunDirectAction(action)) {
-        if (this.runMetrics) this.runMetrics.kind = 'direct';
+        if (this.runMetrics) {
+          this.runMetrics.kind = 'direct';
+          // Real HYBRID signal (§6): if this attempt falls through to the
+          // LLM loop below, BOTH layers genuinely ran for this task.
+          this.runMetrics.directAttempted = true;
+        }
         const handled = await this.runDirectTask(userMessage, action);
         if (handled) return; // completed (or denied) without any model call
       }
@@ -758,9 +770,22 @@ export class AgentOrchestrator {
     }
   }
 
+  /**
+   * The HONEST execution route for the current run (directive §6):
+   * deterministic fast path, model reasoning, or the hybrid case where
+   * the fast path really ran and then the model recovered the failure.
+   */
+  private executionMode(): ExecutionMode {
+    const m = this.runMetrics;
+    if (m?.kind === 'direct') return 'DETERMINISTIC';
+    if (m?.directAttempted) return 'HYBRID';
+    return 'AI_BRAIN';
+  }
+
   private recordMetrics(): void {
     if (!this.runMetrics) return;
     const m = this.runMetrics;
+    const executionMode = this.executionMode();
     // Plan steps carry timing fields (ExecutionStep); fall back to task
     // steps when the plan is gone.
     const steps: ExecutionStep[] = this.currentPlan?.steps ||
@@ -777,6 +802,7 @@ export class AgentOrchestrator {
     telemetry.record({
       taskId: this.currentTask?.id || 'unknown',
       kind: m.kind,
+      executionMode,
       message: (this.currentTask?.instruction || '').slice(0, 120),
       startedAt: m.startedAt,
       queueWaitMs: m.queueWaitMs,
@@ -793,6 +819,9 @@ export class AgentOrchestrator {
     this.emit('task-complete', {
       taskId: this.currentTask?.id,
       kind: m.kind,
+      // Honest route surfaced to Jarvis + the HUD (§6): DETERMINISTIC,
+      // AI_BRAIN or HYBRID — never inferred from the UI side.
+      executionMode,
       totalMs: Date.now() - m.startedAt,
       modelCalls: m.modelCalls,
       toolCalls: tools.length,

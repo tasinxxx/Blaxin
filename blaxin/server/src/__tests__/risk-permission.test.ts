@@ -25,6 +25,16 @@ describe('riskFor', () => {
     expect(riskFor('terminal', {})).toBe('MEDIUM');
   });
 
+  it('treats read-only browser observation as LOW risk (§6)', () => {
+    expect(riskFor('browser', { action: 'current_url' })).toBe('LOW');
+    expect(riskFor('browser', { action: 'page_title' })).toBe('LOW');
+    expect(riskFor('browser', { action: 'list_tabs' })).toBe('LOW');
+    // Navigation/manipulation stays MEDIUM.
+    expect(riskFor('browser', { action: 'open_url' })).toBe('MEDIUM');
+    expect(riskFor('browser', { action: 'back' })).toBe('MEDIUM');
+    expect(riskFor('browser', { action: 'refresh' })).toBe('MEDIUM');
+  });
+
   it('escalates destructive filesystem operations to HIGH', () => {
     expect(riskFor('filesystem', { operation: 'read', path: '/tmp/a' })).toBe('MEDIUM');
     expect(riskFor('filesystem', { operation: 'write', path: '/tmp/a' })).toBe('MEDIUM');

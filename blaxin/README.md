@@ -6,9 +6,13 @@ A futuristic, production-quality AI desktop agent capable of understanding user 
 BLAXIN UI (React + Vite)
     ↓
 Jarvis Command Layer (v1.4.0): deterministic fast-path router →
-  simple commands ("open example.com", "take a screenshot", "list /tmp")
-  execute directly with ZERO model calls; slash commands (/status, /queue,
-  /missions) run locally; ambiguous/complex goals escalate ↓
+  simple commands ("open example.com", "go to youtube", "take a
+  screenshot", "list /tmp", browser back/forward/refresh, current URL,
+  page title, list tabs) execute directly with ZERO model calls; slash
+  commands (/status, /queue, /missions) run locally; ambiguous/complex
+  goals escalate ↓. Every completed task reports its REAL route:
+  DETERMINISTIC (fast path, no model), AI BRAIN (model reasoning), or
+  HYBRID (fast path attempted + failed, then model recovery).
 Agent Orchestrator (WebSocket)
     ↓
 Provider Abstraction Layer
@@ -40,12 +44,15 @@ Supporting subsystems (all real, inspectable state — no simulated UI data):
   Memory page and `GET /api/memory/layers`.
 - **Verification-in-depth**: browser actions verify against the real page
   (URL/title/text/element/playback, tri-state — UNKNOWN never becomes
-  SUCCESS); terminal commands report real exit codes (a nonzero exit is a
-  failure even with stdout); app launches are verified by aliveness
-  read-back; mouse/window actions read the real pointer/active-window back;
-  clipboard writes are verified by read-back; screenshots validate the
-  capture is a real PNG. Where verification is impossible (e.g. Wayland
-  pointer position), the result says so explicitly instead of implying it.
+  SUCCESS); browser back/forward verify the real CDP history index AND the
+  landing URL, refresh verifies the document was really replaced, and
+  current URL / page title / tab list are real reads; terminal commands
+  report real exit codes (a nonzero exit is a failure even with stdout);
+  app launches are verified by aliveness read-back; mouse/window actions
+  read the real pointer/active-window back; clipboard writes are verified
+  by read-back; screenshots validate the capture is a real PNG. Where
+  verification is impossible (e.g. Wayland pointer position), the result
+  says so explicitly instead of implying it.
 
 Since v1.2.0 BLAXIN also ships a **local model system** (real hardware
 discovery, a curated model catalog, deterministic fit recommendation

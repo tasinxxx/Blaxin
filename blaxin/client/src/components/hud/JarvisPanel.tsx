@@ -25,6 +25,13 @@ const STATUS_STYLE: Record<string, React.CSSProperties> = {
   NOT_EXECUTED: { color: 'var(--jh-dim, #7d8aa5)' },
 };
 
+/** Honest execution route labels (§6) — no invented values. */
+const EXEC_MODE_LABEL: Record<string, string> = {
+  DETERMINISTIC: 'DETERMINISTIC',
+  AI_BRAIN: 'AI BRAIN',
+  HYBRID: 'HYBRID (fast path + recovery)',
+};
+
 const STEP_GLYPH: Record<string, string> = {
   completed: '✓',
   failed: '✗',
@@ -41,6 +48,13 @@ export function JarvisPanel() {
 
   const routeLabel = directive
     ? `${directive.complexity.toUpperCase()} · ${directive.reason}`
+    : null;
+
+  // Real run metrics: which route actually executed (fall back to `kind`
+  // for records that predate executionMode — never invented).
+  const metrics = lastReport?.metrics;
+  const execMode = metrics
+    ? (metrics.executionMode ?? (metrics.kind === 'direct' ? 'DETERMINISTIC' : 'AI_BRAIN'))
     : null;
 
   return (
@@ -99,10 +113,10 @@ export function JarvisPanel() {
             </div>
           )}
 
-          {lastReport.metrics && (
-            <div className="jh-jarvis-metrics">
-              {lastReport.metrics.totalMs}ms · {lastReport.metrics.toolCalls} tool call(s)
-              {lastReport.metrics.kind === 'direct' ? ' · fast path' : ''}
+          {metrics && (
+            <div className="jh-jarvis-metrics" data-testid="jarvis-execution-mode">
+              {metrics.totalMs}ms · {metrics.modelCalls} model call(s) · {metrics.toolCalls} tool call(s)
+              {' · '}{EXEC_MODE_LABEL[execMode ?? ''] ?? execMode}
             </div>
           )}
         </div>

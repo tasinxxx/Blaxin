@@ -150,6 +150,13 @@ export function riskFor(name: string, args: Record<string, unknown>, config?: Ap
       if (op === 'delete' || op === 'rename') return 'HIGH';
       return base;
     }
+    case 'browser': {
+      // Pure observation (read the current URL/title, list tabs) changes
+      // nothing — it is not a MEDIUM-risk browser manipulation.
+      const action = String(args.action || '');
+      if (action === 'current_url' || action === 'page_title' || action === 'list_tabs') return 'LOW';
+      return base;
+    }
     case 'terminal': {
       const command = String(args.command || '');
       if (config && matchesAnyPattern(command, config.agent.confirmationPatterns)) return 'CRITICAL';

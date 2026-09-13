@@ -126,7 +126,14 @@ export interface AgentReport {
   /** Real per-step outcomes (bounded). `id` is the runtime's own step identity. */
   evidence: Array<{ id: string; description: string; state: string; result?: string; error?: string }>;
   summary?: string;
-  metrics?: { totalMs: number; modelCalls: number; toolCalls: number; kind: string };
+  metrics?: {
+    totalMs: number;
+    modelCalls: number;
+    toolCalls: number;
+    kind: string;
+    /** Honest execution route (§6): DETERMINISTIC / AI_BRAIN / HYBRID. */
+    executionMode?: 'DETERMINISTIC' | 'AI_BRAIN' | 'HYBRID';
+  };
   blockers: string[];
   reportedAt: number;
 }

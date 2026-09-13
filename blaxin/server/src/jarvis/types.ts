@@ -97,7 +97,14 @@ export interface AgentReport {
   /** Real final assistant reply text, when one was produced. */
   summary?: string;
   /** Real timing from the task-complete event. */
-  metrics?: { totalMs: number; modelCalls: number; toolCalls: number; kind: string };
+  metrics?: {
+    totalMs: number;
+    modelCalls: number;
+    toolCalls: number;
+    kind: string;
+    /** Honest route (§6): DETERMINISTIC / AI_BRAIN / HYBRID. */
+    executionMode?: 'DETERMINISTIC' | 'AI_BRAIN' | 'HYBRID';
+  };
   blockers: string[];
   reportedAt: number;
   /**

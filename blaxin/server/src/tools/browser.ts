@@ -10,15 +10,40 @@ interface Located {
   errorPage: boolean;
 }
 
+/** Actions that only READ browser state — no navigation, no mutation. */
+const READ_ONLY_ACTIONS = new Set(['current_url', 'page_title', 'list_tabs']);
+
+/** Real navigation history (CDP) — the ground truth for back/forward. */
+async function readHistory(
+  cdp: { send: (method: string, params?: Record<string, unknown>) => Promise<any> },
+): Promise<{ currentIndex: number; entries: any[] }> {
+  const raw = await cdp.send('Page.getNavigationHistory');
+  const index = Number(raw?.currentIndex);
+  return {
+    currentIndex: Number.isFinite(index) ? index : -1,
+    entries: Array.isArray(raw?.entries) ? raw.entries : [],
+  };
+}
+
+const sleepMs = (ms: number) => new Promise((r) => setTimeout(r, ms));
+
 export class BrowserTool implements Tool {
   name = 'browser';
-  description = 'Open URLs in a web browser, search the web, and interact with web content.';
+  description = 'Open URLs in a web browser, search the web, navigate browser history, and interact with web content.';
 
   /** The authoritative session (injectable for deterministic tests). */
   private readonly session: typeof browserSession;
+  /** Verification windows (injectable so tests stay fast + deterministic). */
+  private readonly navVerifyMs: number;
+  private readonly reloadVerifyMs: number;
 
-  constructor(session: typeof browserSession = browserSession) {
+  constructor(
+    session: typeof browserSession = browserSession,
+    opts: { navVerifyMs?: number; reloadVerifyMs?: number } = {},
+  ) {
     this.session = session;
+    this.navVerifyMs = opts.navVerifyMs ?? 6000;
+    this.reloadVerifyMs = opts.reloadVerifyMs ?? 8000;
   }
 
   definition = {
@@ -31,7 +56,10 @@ export class BrowserTool implements Tool {
         properties: {
           action: {
             type: 'string',
-            enum: ['open_url', 'search', 'open_new_tab', 'close_tab'],
+            enum: [
+              'open_url', 'search', 'open_new_tab', 'close_tab',
+              'back', 'forward', 'refresh', 'current_url', 'page_title', 'list_tabs',
+            ],
             description: 'The browser action to perform',
           },
           url: {
@@ -214,6 +242,211 @@ export class BrowserTool implements Tool {
           };
         }
 
+        case 'back':
+        case 'forward': {
+          const sinceTs = Date.now();
+          let cdp = await this.session.acquire();
+          // REAL history from CDP — never a blind alt+left key event, and
+          // never a claim the result cannot verify (§9/§10).
+          const history = await readHistory(cdp);
+          const targetIndex = action === 'back' ? history.currentIndex - 1 : history.currentIndex + 1;
+          const targetEntry = history.entries[targetIndex];
+          if (history.currentIndex < 0 || !targetEntry) {
+            return withDesyncNote({
+              success: false,
+              output: '',
+              error: `${action} NOT possible — no ${action === 'back' ? 'earlier' : 'later'} history entry (real index ${history.currentIndex}, ${history.entries.length} entries)`,
+              data: {
+                verification: {
+                  status: 'FAILURE', method: 'history-index',
+                  evidence: { currentIndex: history.currentIndex, entries: history.entries.length },
+                  confidence: 0.9, detail: 'No history entry in that direction',
+                },
+              },
+            }, desyncNote(this.session, sinceTs));
+          }
+          const expectedUrl = String(targetEntry.url ?? '');
+          this.session.recordNavigation(expectedUrl);
+          await cdp.send('Page.navigateToHistoryEntry', { entryId: targetEntry.id });
+          // VERIFY the REAL outcome: the location must match the entry AND
+          // the history index must actually have moved there (a same-URL
+          // entry still has to prove movement).
+          let v = await verifyUrl(cdp, expectedUrl, this.navVerifyMs);
+          if (v.status === 'UNKNOWN') {
+            // Desync contract: UNKNOWN → reacquire → observe → verify.
+            try {
+              cdp = await this.session.reacquire();
+              v = await verifyUrl(cdp, expectedUrl, Math.min(this.navVerifyMs, 4000));
+            } catch (e: any) {
+              v = {
+                status: 'UNKNOWN', method: 'url-match', evidence: null, confidence: 0,
+                detail: `Reacquire after desync failed: ${e?.message ?? e} — URL unverified`,
+              };
+            }
+          }
+          let movedIndex: number | null = null;
+          try { movedIndex = (await readHistory(cdp)).currentIndex; } catch { movedIndex = null; }
+          const indexVerified = movedIndex === targetIndex;
+          const desync = desyncNote(this.session, sinceTs);
+          if (v.status === 'SUCCESS' && indexVerified) {
+            const loc = v.evidence as unknown as Located | null;
+            return withDesyncNote({
+              success: true,
+              output: `${action === 'back' ? 'Went back' : 'Went forward'} to ${loc?.url ?? expectedUrl} (history index ${targetIndex} + URL verified).`,
+              data: { verification: v, historyIndex: targetIndex },
+            }, desync);
+          }
+          const reason = v.status !== 'SUCCESS'
+            ? v.detail
+            : `URL matched but the real history index is ${movedIndex ?? 'unreadable'} (expected ${targetIndex})`;
+          return withDesyncNote({
+            success: false,
+            output: '',
+            error: `${action} NOT verified — ${reason}`,
+            data: {
+              verification: {
+                status: v.status === 'SUCCESS' ? 'FAILURE' : v.status,
+                method: 'history-navigation',
+                evidence: {
+                  url: (v.evidence as unknown as Located | null)?.url ?? null,
+                  expectedUrl, currentIndex: movedIndex, targetIndex,
+                },
+                confidence: v.status === 'SUCCESS' ? 0.85 : v.confidence,
+                detail: reason,
+              },
+            },
+          }, desync);
+        }
+
+        case 'refresh': {
+          const sinceTs = Date.now();
+          const cdp = await this.session.acquire();
+          // REAL reload evidence: a reload replaces the JS context, so a
+          // marker planted beforehand MUST disappear. "Page.reload was
+          // sent" is never reported as "the page reloaded" (§10).
+          const marker = `blx_${Date.now()}_${Math.random().toString(36).slice(2)}`;
+          let planted = false;
+          try {
+            await cdp.eval<boolean>(
+              `(() => { window.__blaxinReloadMarker = ${JSON.stringify(marker)}; return true; })()`,
+            );
+            planted = true;
+          } catch { planted = false; }
+          if (!planted) {
+            return withDesyncNote({
+              success: false, output: '',
+              error: 'refresh NOT verified — could not plant a reload baseline (page unobservable)',
+              data: {
+                verification: {
+                  status: 'UNKNOWN', method: 'reload-marker', evidence: null, confidence: 0,
+                  detail: 'Pre-reload baseline marker could not be set',
+                },
+              },
+            }, desyncNote(this.session, sinceTs));
+          }
+          await cdp.send('Page.reload', { ignoreCache: false });
+          const deadline = Date.now() + this.reloadVerifyMs;
+          let observed: { marker: string | null; url: string; title: string } | null = null;
+          let reloaded = false;
+          while (Date.now() < deadline) {
+            try {
+              const state = await cdp.eval<{ marker: string | null; url: string; title: string }>(
+                `(() => ({ marker: window.__blaxinReloadMarker ?? null, url: location.href, title: document.title }))()`,
+              );
+              if (state && typeof state.url === 'string') {
+                observed = state;
+                // Fresh document ⇒ our marker is gone.
+                if (state.marker !== marker) { reloaded = true; break; }
+              }
+            } catch { /* document being replaced — keep polling */ }
+            await sleepMs(250);
+          }
+          const desync = desyncNote(this.session, sinceTs);
+          if (!reloaded) {
+            return withDesyncNote({
+              success: false, output: '',
+              error: `refresh NOT verified — the page context survived the reload (real URL ${observed?.url ?? 'unreadable'})`,
+              data: {
+                verification: {
+                  status: 'FAILURE', method: 'reload-marker', evidence: observed, confidence: 0.85,
+                  detail: 'Pre-reload marker still present after the reload window',
+                },
+              },
+            }, desync);
+          }
+          return withDesyncNote({
+            success: true,
+            output: `Refreshed ${observed?.url ?? 'the page'} — fresh document observed (title: "${observed?.title ?? ''}").`,
+            data: {
+              verification: {
+                status: 'SUCCESS', method: 'reload-marker', evidence: observed, confidence: 0.9,
+                detail: 'Pre-reload marker cleared — the document really reloaded',
+              },
+            },
+          }, desync);
+        }
+
+        case 'current_url':
+        case 'page_title': {
+          const sinceTs = Date.now();
+          let cdp = await this.session.acquire();
+          const read = async (): Promise<{ url: string; title: string } | null> => {
+            try {
+              const loc = await cdp.eval<{ url: string; title: string }>(
+                '(() => ({ url: location.href, title: document.title }))()',
+              );
+              return loc && typeof loc.url === 'string' ? loc : null;
+            } catch {
+              return null;
+            }
+          };
+          let loc = await read();
+          if (!loc) {
+            // Desync contract: UNKNOWN → reacquire → observe again.
+            try {
+              cdp = await this.session.reacquire();
+              loc = await read();
+            } catch { loc = null; }
+          }
+          const desync = desyncNote(this.session, sinceTs);
+          if (!loc) {
+            return withDesyncNote({
+              success: false, output: '',
+              error: `Could not read the page ${action === 'page_title' ? 'title' : 'URL'} — the page is not observable`,
+            }, desync);
+          }
+          return withDesyncNote({
+            success: true,
+            output: action === 'current_url'
+              ? `Current URL: ${loc.url}`
+              : `Page title: "${loc.title}" (${loc.url})`,
+            data: { url: loc.url, title: loc.title },
+          }, desync);
+        }
+
+        case 'list_tabs': {
+          // Read-only: query the REAL page-target list without launching or
+          // navigating anything (no side effects when no browser is up).
+          let targets;
+          try {
+            targets = await this.session.listTargets();
+          } catch (e: any) {
+            return {
+              success: false, output: '',
+              error: `list_tabs NOT verified — could not reach the browser's debugging endpoint: ${e?.message ?? e}`,
+            };
+          }
+          if (targets.length === 0) {
+            return { success: true, output: 'No open browser tabs found.', data: { tabs: [] } };
+          }
+          const lines = targets.map((t, i) => `${i + 1}. ${t.title ? `"${t.title}" — ` : ''}${t.url} (target ${t.targetId})`);
+          return {
+            success: true,
+            output: `${targets.length} open tab(s):\n${lines.join('\n')}`,
+            data: { tabs: targets },
+          };
+        }
+
         default:
           return { success: false, output: '', error: `Unknown browser action: ${action}` };
       }
@@ -223,8 +456,10 @@ export class BrowserTool implements Tool {
   }
 
   requiresConfirmation(args: Record<string, unknown>): boolean {
-    // Every action now manipulates real browser state through the session.
-    return true;
+    // Navigation/state-changing actions are always gated. Read-only
+    // observations (current URL, title, tab list) change nothing, so they
+    // follow the same convention as the filesystem's read/list operations.
+    return !READ_ONLY_ACTIONS.has(String(args.action ?? ''));
   }
 }
 

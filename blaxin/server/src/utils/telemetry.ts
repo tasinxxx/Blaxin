@@ -18,10 +18,27 @@ export interface ToolTiming {
   state: string;
 }
 
+/**
+ * Honest execution route for a task (directive §6):
+ *   DETERMINISTIC — resolved by the deterministic fast path, zero model calls
+ *   AI_BRAIN      — model reasoning all the way (no fast-path candidate)
+ *   HYBRID        — the fast path was tried and FAILED, then the model
+ *                   diagnosed/recovered (both layers really ran)
+ */
+export type ExecutionMode = 'DETERMINISTIC' | 'AI_BRAIN' | 'HYBRID';
+
+/** Derive the execution mode; legacy records without it fall back to `kind`. */
+export function executionModeOf(entry: Pick<TaskMetrics, 'kind' | 'executionMode'>): ExecutionMode {
+  if (entry.executionMode) return entry.executionMode;
+  return entry.kind === 'direct' ? 'DETERMINISTIC' : 'AI_BRAIN';
+}
+
 export interface TaskMetrics {
   taskId: string;
   /** How the task was executed: direct (no model) or llm. */
   kind: 'direct' | 'llm';
+  /** Explicit three-way route (optional for backward compatibility). */
+  executionMode?: ExecutionMode;
   message: string;
   startedAt: number;
   queueWaitMs: number;
@@ -119,6 +136,13 @@ class Telemetry {
       llm: samples.filter((s) => s.kind === 'llm').length,
       errors: samples.filter((s) => s.result !== 'completed').length,
       byKind: { direct: byKind('direct'), llm: byKind('llm') },
+      // Real route counts — deterministic fast paths vs model reasoning
+      // vs the hybrid recovery path (directive §6/§21).
+      executionModes: {
+        DETERMINISTIC: samples.filter((s) => executionModeOf(s) === 'DETERMINISTIC').length,
+        AI_BRAIN: samples.filter((s) => executionModeOf(s) === 'AI_BRAIN').length,
+        HYBRID: samples.filter((s) => executionModeOf(s) === 'HYBRID').length,
+      },
     };
   }
 

@@ -212,6 +212,58 @@ export function classifyDirect(rawMessage: string): DirectAction | null {
     return { tool: 'system-info', args: { info: 'all' }, summary: 'Gathering system information…' };
   }
 
+  // ── Browser session control (deterministic, verified) ────────
+  // The directive's fast-path list: back / forward / refresh / new tab /
+  // close tab / current URL / page title / list tabs. Each is a single
+  // unambiguous browser action — dispatched with ZERO model calls. The
+  // browser tool's own policy gate still applies to mutating actions.
+  if (
+    /^(go\s+)?back$/.test(lower) ||
+    /^(go\s+)?back\s+(a|one)\s+(page|tab|step)$/.test(lower) ||
+    /^(go\s+to\s+the\s+)?previous\s+(page|tab)$/.test(lower) ||
+    /^browser\s+back$/.test(lower)
+  ) {
+    return { tool: 'browser', args: { action: 'back' }, summary: 'Going back…' };
+  }
+  if (
+    /^(go\s+)?forward$/.test(lower) ||
+    /^(go\s+)?forward\s+(a|one)\s+(page|tab|step)$/.test(lower) ||
+    /^(go\s+to\s+the\s+)?next\s+(page|tab)$/.test(lower) ||
+    /^browser\s+forward$/.test(lower)
+  ) {
+    return { tool: 'browser', args: { action: 'forward' }, summary: 'Going forward…' };
+  }
+  if (/^(refresh|reload)(\s+(the\s+)?(page|tab|browser|view|it))?$/.test(lower)) {
+    return { tool: 'browser', args: { action: 'refresh' }, summary: 'Refreshing the page…' };
+  }
+  if (/^new\s+tab$/.test(lower) || /^(open|create|make)\s+(a\s+|another\s+)?new\s+tab$/.test(lower)) {
+    return { tool: 'browser', args: { action: 'open_new_tab' }, summary: 'Opening a new tab…' };
+  }
+  if (/^close\s+(this\s+|the\s+|current\s+|my\s+)?(current\s+)?tab$/.test(lower)) {
+    return { tool: 'browser', args: { action: 'close_tab' }, summary: 'Closing the current tab…' };
+  }
+  if (
+    /^(what('s| is)\s+)?(the\s+)?current\s+(url|page|page\s+url|address|link)$/.test(lower) ||
+    /^what\s+url\s+(am\s+i\s+on|is\s+open)$/.test(lower) ||
+    /^what\s+page\s+(am\s+i\s+on|is\s+(this|open))$/.test(lower) ||
+    /^(show|get|tell\s+me)\s+(me\s+)?(the\s+)?(current\s+)?(url|page\s+url|address)$/.test(lower)
+  ) {
+    return { tool: 'browser', args: { action: 'current_url' }, summary: 'Reading the current URL…' };
+  }
+  if (
+    /^(what('s| is)\s+)?(the\s+)?(current\s+)?page\s+title$/.test(lower) ||
+    /^(what('s| is)\s+)?(the\s+)?title\s+of\s+(this|the)\s+page$/.test(lower) ||
+    /^(show|get|tell\s+me)\s+(me\s+)?(the\s+)?page\s+title$/.test(lower)
+  ) {
+    return { tool: 'browser', args: { action: 'page_title' }, summary: 'Reading the page title…' };
+  }
+  if (
+    /^(list|show)\s+(me\s+)?(the\s+)?(open\s+|browser\s+)*tabs$/.test(lower) ||
+    /^what\s+tabs\s+are\s+open$/.test(lower)
+  ) {
+    return { tool: 'browser', args: { action: 'list_tabs' }, summary: 'Listing open tabs…' };
+  }
+
   // ── Open a URL ────────────────────────────────────────────────
   const openMatch = text.match(/^open\s+(.+)$/i);
   let openedTarget = '';
@@ -237,6 +289,23 @@ export function classifyDirect(rawMessage: string): DirectAction | null {
         };
       }
     }
+  }
+
+  // ── Navigate to a URL/site ("go to youtube", "navigate to example.com") ──
+  const gotoMatch = text.match(/^(?:go to|goto|navigate to|take me to)\s+(.+)$/i);
+  if (gotoMatch) {
+    const target = cleanTrailing(gotoMatch[1]);
+    if (target) {
+      const url = isProbablyUrl(target)
+        ? (/^https?:\/\//i.test(target) ? target : `https://${target}`)
+        : siteAliasUrl(target);
+      if (url) {
+        return { tool: 'browser', args: { action: 'open_url', url }, summary: `Opening ${target}…` };
+      }
+    }
+    // Unresolvable navigation target ("go to my settings page") — the LLM
+    // loop must interpret it rather than guess a destination.
+    return null;
   }
 
   // ── Read a file / "what's in <path>" ─────────────────────────
