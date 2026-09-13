@@ -93,9 +93,15 @@ and client package.json all `1.4.0`.
   Fixes verified in the SYNCED bundle by re-running the same packaged smoke:
   exactly 4 lines, `stale RUNNING: 0`. Two regression tests added.
 - Re-synced `resources/blaxin-server` after the fix (guard again reported
-  and performed the sync), so the bundled source-of-truth carries it. NOTE:
-  the .deb file on disk was built ~1 minute BEFORE this one-line fix —
-  re-run `cargo tauri build --bundles deb` (≈3.5 min) to refresh it.
+  and performed the sync), then **rebuilt the .deb so the artifact carries
+  it**: fresh `BLAXIN_1.4.0_amd64.deb` (39,959,056 B, 15:37) —
+  symbol-probed (`announces execution more than once` present) and
+  runtime-smoked from the EXTRACTED deb with the bundled node:
+  `/api/health` 1.4.0 → real queued task → `/api/journal` = 4 clean lines
+  (RESULT COMPLETED · DETERMINISTIC, PLAN, OBSERVATION, ACTION COMPLETED),
+  **stale RUNNING: 0**. The on-disk artifact now reflects the newest source.
+  Note: `blaxin/resources/` is gitignored (CI builds it on release); only
+  the source fix is committed.
 
 ### Verification this phase (evidence, no claims)
 - Server `tsc --noEmit` clean; FULL suite **649 passed / 12 skipped / 0
