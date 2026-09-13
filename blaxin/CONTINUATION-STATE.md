@@ -1,5 +1,135 @@
 # BLAXIN Engineering Mission — Continuation State
 
+## SESSION — MISSION JOURNAL + LIVE DESKTOP VERIFICATION + PACKAGING (2026-09-13, PART 13)
+
+Continued implementation (not a test-only pass). Two capabilities were
+actually MISSING and are now real: the §20 mission journal, and live proof
+that desktop control works on a real X session. Packaging was then
+re-synced and the artifact rebuilt.
+
+### 1. Mission journal (§20) — IMPLEMENTED END TO END
+`server/src/utils/mission-journal.ts` (NEW): a bounded (400 lines),
+persisted (`.blaxin-state/journal.json`) journal derived EXCLUSIVELY from
+real runtime events. Line model: timestamp, monotonic seq, kind, explicit
+status, objective, mission/task id, REAL runtime step id, specialist (the
+role derived from the tool that actually ran), intended action, actual
+action, observation, real verification evidence, retry count, failure
+reason, recovery action, detail.
+
+- Kinds recorded from real events: COMMAND + ROUTER (`jarvis-event`),
+  PLAN (first real `task-progress` for a task), ACTION (created on
+  `tool-execution` executing and UPDATED IN PLACE when it settles — one
+  line per real action, never duplicated), OBSERVATION (the tool's real
+  output), VERIFICATION (only when the tool returned real verification
+  evidence), RECOVERY (`tool-execution` retrying with the true retry
+  count; browser-session desync/recovered/lost), MEMORY
+  (`memory-selected`), RESULT (`task-complete` with the real execution
+  mode + metrics; mission status transitions), BLOCKED
+  (`confirmation-required`, tool parsed from the real gate payload).
+- `tool-execution` now carries the tool's REAL `verification` payload and
+  `error`, so the journal can record HOW an outcome was verified.
+- HONESTY FIX: a failed deterministic action now publishes its settled
+  `failed` event BEFORE the rollback erases the attempt — previously the
+  agency/journal could have shown a stale RUNNING action (the direct path
+  never called settleResult).
+- Wiring: `missionJournal.onChange` → `journal-updated` broadcast; connect
+  snapshot; REST `GET /api/journal?limit=` + `DELETE /api/journal`.
+- Client: journal slice (bounded 400) + `journal-updated` handler +
+  `JournalPage` (kind filter, per-line kind/status/specialist/retries,
+  objective/intent/action/observed/verified/failure/recovery/detail/ids)
+  + Sidebar "Journal" entry. Real data only — empty state says so.
+- Tests: `__tests__/mission-journal.test.ts` (11): full-run ordering
+  (COMMAND→ROUTER→PLAN→ACTION→OBSERVATION→VERIFICATION→RESULT),
+  one-ACTION-per-action in-place update, UNVERIFIED line on UNKNOWN
+  evidence, retry→RECOVERY with real counts, BLOCKED from a real gate
+  payload, no tool invented from a malformed payload, browser session
+  recovery lines, mission status transitions, NO entries for empty/
+  uninformative events, persistence across restart (seq continues),
+  bounded ring drops only the oldest, clear() empties file+memory.
+
+### 2. Desktop control verified on the LIVE X session (Phase 2)
+This machine HAS a live X session (`DISPLAY=:0.0`, `xdpyinfo` OK), so
+desktop control was verified for real instead of only with fake runners.
+`__tests__/tools/desktop-live.test.ts` (NEW, env-gated
+`BLAXIN_LIVE_DESKTOP=1` + a working DISPLAY): **5/5 PASS in 4.4s** —
+real screen geometry, real pointer move verified by position read-back
+(±2px, then restored to where it was), real window list / active window,
+a real non-zero screenshot, and a clipboard write verified by genuine
+read-back. No implementation fix was needed: the existing
+verification-in-depth holds on the real display.
+Keystroke injection is deliberately NOT exercised live (the host has a
+focused window, possibly a terminal); that path's honest "events sent;
+receiver not verified" phrasing stays pinned deterministically.
+
+### 3. Packaging (Phase 12) — re-synced + rebuilt
+- `cd server && npm run build` → `bash scripts/bundle-sync-guard.sh`
+detected the stale bundle and re-synced (`server/dist is newer than the
+bundled copy — syncing`), then a re-run reported `bundled server dist is
+current` (the guard is idempotent).
+- Symbol probes on the PACKAGED resources: `dist/utils/mission-journal.js`
+and `.d.ts` present, `roleForTool` in `agency/registry.js`, `list_tabs` +
+`page_title` in `router/direct.js` — the artifact now carries today's
+work, not a Sep-12 dist.
+- Version consistency re-checked: VERSION, server, resources/blaxin-server
+and client package.json all `1.4.0`.
+- `cargo tauri build --bundles deb` re-run with the guard as
+  beforeBuildCommand (16G warm target dir): **fresh `BLAXIN_1.4.0_amd64.deb`
+  (39,958,238 B)**; the trailing updater-signing message is the documented
+  CI-held-key behaviour (the deb itself is complete).
+- **Packaged runtime smoke (real)**: extracted the deb → bundled node
+  (`usr/lib/BLAXIN/node/bin/node`, v20) + packaged server on port 3201 with
+  a scratch data dir → `/api/health` `{status:ok, version:1.4.0}` → queued
+  the real objective `list the contents of /tmp` → **NEW `/api/journal`
+  returned the REAL trail**: `RESULT COMPLETED 18-22ms · 0 model call(s) ·
+  1 tool call(s) · DETERMINISTIC`, `PLAN`, `OBSERVATION`, `ACTION
+  COMPLETED`.
+- **RELEASE-BLOCKING BUG FOUND BY THAT SMOKE, THEN FIXED**: the trail
+  contained a SECOND `ACTION … RUNNING` line that never settled. Root
+  cause: the runtime emits `tool-execution state=executing` TWICE per step
+  (`announceExecution` + the body), and the journal appended a fresh ACTION
+  line each time — the later `completed` updated only the last one, leaving
+  the first permanently stale. The journal is now idempotent for repeated
+  `executing` announcements (one line per real action, updated in place).
+  Fixes verified in the SYNCED bundle by re-running the same packaged smoke:
+  exactly 4 lines, `stale RUNNING: 0`. Two regression tests added.
+- Re-synced `resources/blaxin-server` after the fix (guard again reported
+  and performed the sync), so the bundled source-of-truth carries it. NOTE:
+  the .deb file on disk was built ~1 minute BEFORE this one-line fix —
+  re-run `cargo tauri build --bundles deb` (≈3.5 min) to refresh it.
+
+### Verification this phase (evidence, no claims)
+- Server `tsc --noEmit` clean; FULL suite **649 passed / 12 skipped / 0
+  failed** (skips = 6 real-Chrome + 5 live-desktop + 1 live-LLM, all
+  env-gated). One run hit the DOCUMENTED real-TLS load flake
+  (`wss-transport` validated-certificate pairing, 40159ms) — passes 4/4 in
+  isolation in 3s; not a regression.
+- Client `tsc -b` + `vite build` clean (5.1s).
+- E2E (real backend + vite + real Chrome): **8/8 PASS** (25.5s).
+- Live X desktop suite: **5/5 PASS**.
+- Commits: **1d4c582** (mission journal, server+client+tests) and
+  **6c86892** (live desktop verification) — both pushed to main.
+
+### Honest remaining gaps
+- Voice physical output and live-LLM round trips remain
+  environment-blocked (no provider key / no verifiable audio sink).
+- Autonomy depth: recovery is bounded and event-driven (retry with
+  backoff + the browser session's 3-strategy recovery); a general
+  re-planning loop after repeated failures is still the LLM's job rather
+  than a first-class engine feature.
+
+### NEXT IMPLEMENTATION TARGET
+1. **Bounded auto-recovery / re-planning (§5, Phase 5)**: on an action
+   failure, classify the failure from real evidence (browser desync vs
+   tool error vs timeout), and when a deterministic recovery exists run it
+   and RE-VERIFY — recording the attempt in the journal — instead of
+   always handing straight to the model. Keep it strictly bounded.
+2. Then specialist delegation depth (§6): let a bounded objective be handed
+   to a specialist (browser/files/terminal) with its own observe→verify
+   loop, still under the same policy gate.
+3. v1.4.0 tag remains deferred until the agreed scope is verified.
+
+---
+
 ## SESSION — REAL-CHROME PROOF FOR THE NEW SESSION ACTIONS (2026-09-13, PART 12)
 
 Closed the honest gap Part 10 documented ("unit-verified against a stateful

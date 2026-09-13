@@ -34,6 +34,13 @@ Supporting subsystems (all real, inspectable state — no simulated UI data):
 - **Agency Registry**: every actual tool execution becomes an observable
   worker (real runtime step ids, real lifecycle events) — the HUD agency
   panel can only show what really ran.
+- **Mission Journal**: a bounded, persisted record of what the system
+  actually did — command, routing decision, plan, each action keyed by its
+  real runtime step id (with intended vs actual action), the observation,
+  the real verification method/result, bounded recovery with the true retry
+  count, memory selections, the specialist that ran, and the final result
+  with its execution mode. `GET /api/journal`, live over WS, and a Journal
+  page in the HUD. Nothing is recorded that did not really happen.
 - **Layered Memory (v1.4.0)**: failure / environment / episodic / procedural
   stores with secret redaction and honest degradation; a relevance-gated,
   budget-capped advisor injects background context into the LLM system

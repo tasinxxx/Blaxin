@@ -320,6 +320,21 @@ export class MissionJournal {
     const info = actionId ? this.steps.get(actionId) : undefined;
 
     if (state === 'executing') {
+      // The runtime announces execution more than once per step (announce +
+      // body). ONE line per real action: update in place, never duplicate —
+      // a duplicate would leave a permanently stale RUNNING line behind.
+      const existing = actionId ? this.actionEntries.get(actionId) : undefined;
+      if (existing) {
+        this.patch(existing, {
+          status: 'RUNNING',
+          action: tool,
+          specialist: roleForTool(tool),
+          taskId: info?.taskId ?? this.byId.get(existing)?.taskId,
+          objective: info?.objective ?? this.byId.get(existing)?.objective,
+          intent: info?.description ?? this.byId.get(existing)?.intent,
+        });
+        return;
+      }
       const entry = this.append({
         kind: 'ACTION',
         status: 'RUNNING',

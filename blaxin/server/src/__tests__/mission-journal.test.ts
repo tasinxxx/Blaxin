@@ -105,6 +105,37 @@ describe('mission journal — real event ingestion', () => {
     expect(action.status).toBe('COMPLETED');
   });
 
+  it('is idempotent for repeated executing announcements — one line per real action', () => {
+    const j = make();
+    // The runtime announces execution twice per step (announce + body). A
+    // duplicate line would leave a stale RUNNING action behind forever —
+    // this was found by running the PACKAGED server and reading /api/journal.
+    j.ingest('tool-execution', { toolName: 'filesystem', state: 'executing', stepId: 's1' });
+    j.ingest('tool-execution', { toolName: 'filesystem', state: 'executing', stepId: 's1' });
+    j.ingest('tool-execution', { toolName: 'filesystem', state: 'completed', stepId: 's1', result: 'ok' });
+
+    const actions = j.list().filter((e) => e.kind === 'ACTION');
+    expect(actions).toHaveLength(1);
+    expect(actions[0].status).toBe('COMPLETED');
+  });
+
+  it('never leaves a RUNNING action after the direct path settles a failure', () => {
+    const j = make();
+    // runDirectTask emits executing → (failure) → failed before rollback.
+    j.ingest('tool-execution', { toolName: 'browser', state: 'executing', stepId: 's1' });
+    j.ingest('tool-execution', { toolName: 'browser', state: 'executing', stepId: 's1' });
+    j.ingest('tool-execution', {
+      toolName: 'browser', state: 'failed', stepId: 's1',
+      error: 'open_url NOT verified — URL unverified',
+    });
+
+    const actions = j.list().filter((e) => e.kind === 'ACTION');
+    expect(actions).toHaveLength(1);
+    expect(actions[0].status).toBe('FAILED');
+    expect(actions[0].failure).toContain('NOT verified');
+    expect(j.list().some((e) => e.status === 'RUNNING')).toBe(false);
+  });
+
   it('records a real confirmation gate as BLOCKED with the tool from the gate payload', () => {
     const j = make();
     j.ingest('confirmation-required', {
