@@ -327,6 +327,32 @@ export function useWebSocket() {
               }
               break;
 
+            case 'specialist-assigned':
+              // Specialist delegation (§6): a real objective was claimed
+              // by a tool-activated specialist under explicit budgets.
+              if (data && typeof data.objectiveId === 'string') {
+                useAppStore.getState().addActivityLine({
+                  id: nextActivityId(),
+                  time: Date.now(),
+                  kind: 'info',
+                  text: `DELEGATED → ${String(data.specialist || 'SPECIALIST')} (${String(data.objective || '').slice(0, 80)})`,
+                });
+              }
+              break;
+
+            case 'specialist-result':
+              // Real specialist result — the honest verification level is
+              // shown verbatim; UNVERIFIED is never reworded into success.
+              if (data && typeof data.objectiveId === 'string') {
+                useAppStore.getState().addActivityLine({
+                  id: nextActivityId(),
+                  time: Date.now(),
+                  kind: data.status === 'COMPLETED_VERIFIED' ? 'reply' : data.status === 'FAILED' || data.status === 'TIMED_OUT' ? 'error' : 'info',
+                  text: `SPECIALIST ${String(data.role || '')}: ${String(data.status)} · verification ${String(data.verification)}`.slice(0, 240),
+                });
+              }
+              break;
+
             case 'skills-selected':
               // Skill runtime (§14/§58): which skills the orchestrator
               // selected for THIS objective, with real match reasons.

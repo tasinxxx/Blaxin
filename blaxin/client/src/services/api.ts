@@ -71,7 +71,7 @@ export type JournalStatus =
   | 'BLOCKED' | 'RECOVERING' | 'RECOVERED' | 'UNVERIFIED';
 
 export type JournalKind =
-  | 'COMMAND' | 'ROUTER' | 'PLAN' | 'ACTION' | 'OBSERVATION'
+  | 'COMMAND' | 'ROUTER' | 'PLAN' | 'DELEGATED' | 'ACTION' | 'OBSERVATION'
   | 'VERIFICATION' | 'RECOVERY' | 'REPLAN' | 'MEMORY' | 'RESULT';
 
 export interface JournalEntry {
@@ -85,6 +85,8 @@ export interface JournalEntry {
   taskId?: string;
   actionId?: string;
   specialist?: string;
+  /** Real specialist objective id (objectiveId binding, §6). */
+  objectiveId?: string;
   intent?: string;
   action?: string;
   observation?: string;

@@ -108,6 +108,12 @@ export interface AgentReport {
   blockers: string[];
   reportedAt: number;
   /**
+   * Real specialist delegation evidence for THIS run, when one existed.
+   * Present only when a real specialist-assigned/result event arrived —
+   * never synthesized for display.
+   */
+  specialist?: JarvisSpecialistState['result'] & { objectiveId: string; specialist: string; objective: string };
+  /**
    * Mission-directive reports only: the mission's REAL checkpoint state
    * (mission-control contract). Present when the terminating evidence
    * comes from a mission store snapshot — never fabricated.
@@ -181,6 +187,46 @@ export interface JarvisRecoveryState {
   };
 }
 
+/**
+ * REAL specialist delegation state of the current run — present only
+ * while a specialist objective actually exists (a real tool activation
+ * claimed it). Every field comes from a real specialist event; nothing
+ * here is decorative, and no specialist is shown without an objective.
+ */
+export interface JarvisSpecialistState {
+  objectiveId: string;
+  /** Specialist role derived from the real tool activation (BROWSER/FILES/…). */
+  specialist: string;
+  /** The delegated objective (the user's own instruction, bounded). */
+  objective: string;
+  taskId?: string;
+  /** ASSIGNED / RUNNING (live) — terminal results REPLACE the block. */
+  status: string;
+  budgets: {
+    maxActions: number;
+    maxRecoveries: number;
+    maxReplans: number;
+    deadlineMs: number;
+  };
+  /** Real budget usage (what has actually been spent). */
+  actionsUsed?: number;
+  recoveriesUsed?: number;
+  replansUsed?: number;
+  /** Present ONLY on a settled specialist-result event. */
+  result?: {
+    status: string;
+    /** Honest verification level: VERIFIED / PARTIAL / UNVERIFIED. */
+    verification: 'VERIFIED' | 'PARTIAL' | 'UNVERIFIED';
+    completedCount: number;
+    verifiedCount: number;
+    failedCount: number;
+    deniedCount: number;
+    deadlineExceeded: boolean;
+    durationMs: number;
+    summary: string;
+  };
+}
+
 /** Snapshot broadcast on connect so the HUD never shows stale state. */
 export interface JarvisSnapshot {
   phase: JarvisPhase;
@@ -188,4 +234,6 @@ export interface JarvisSnapshot {
   lastReport: AgentReport | null;
   /** Present only when deterministic recovery/re-plan is really active. */
   recovery?: JarvisRecoveryState;
+  /** Present only when a specialist objective really exists. */
+  specialist?: JarvisSpecialistState;
 }

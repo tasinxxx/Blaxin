@@ -28,6 +28,7 @@ const KIND_COLOR: Record<string, string> = {
   COMMAND: 'var(--accent-primary)',
   ROUTER: 'var(--accent-secondary)',
   PLAN: 'var(--accent-secondary)',
+  DELEGATED: 'var(--accent-primary)',
   ACTION: 'var(--text-primary)',
   OBSERVATION: 'var(--text-secondary)',
   VERIFICATION: 'var(--accent-green)',
@@ -38,7 +39,7 @@ const KIND_COLOR: Record<string, string> = {
 };
 
 const ALL_KINDS: JournalKind[] = [
-  'COMMAND', 'ROUTER', 'PLAN', 'ACTION', 'OBSERVATION',
+  'COMMAND', 'ROUTER', 'PLAN', 'DELEGATED', 'ACTION', 'OBSERVATION',
   'VERIFICATION', 'RECOVERY', 'REPLAN', 'MEMORY', 'RESULT',
 ];
 
@@ -233,6 +234,7 @@ export function JournalPage() {
             <Field
               label="ids"
               value={[
+                e.objectiveId ? `objective:${e.objectiveId}` : null,
                 e.missionId ? `mission:${e.missionId}` : null,
                 e.taskId ? `task:${e.taskId}` : null,
                 e.actionId ? `action:${e.actionId}` : null,

@@ -31,6 +31,7 @@ export type JournalKind =
   | 'COMMAND'
   | 'ROUTER'
   | 'PLAN'
+  | 'DELEGATED'
   | 'ACTION'
   | 'OBSERVATION'
   | 'VERIFICATION'
@@ -69,8 +70,15 @@ export interface JournalEntry {
   taskId?: string;
   /** REAL runtime step id (orchestrator TaskStep.id) — never generated. */
   actionId?: string;
-  /** Specialist role derived from the ACTUAL tool that ran. */
+  /**
+   * The specialist this line belongs to. For DELEGATED lines it is the
+   * PLANNED/assigned role; for specialist RESULT lines it is the
+   * OBSERVED/result role. On ACTION/OBSERVATION/VERIFICATION lines the
+   * existing derivation from the ACTUAL tool that ran is unchanged.
+   */
   specialist?: string;
+  /** Real specialist objective id when the event carries one (objectiveId binding). */
+  objectiveId?: string;
   /** Intended action (the real step description). */
   intent?: string;
   /** Actual tool invoked. */
@@ -130,6 +138,8 @@ export class MissionJournal {
   /** actionId (real step id) → the ACTION entry recording it. */
   private actionEntries = new Map<string, string>();
   private steps = new Map<string, StepInfo>();
+  /** step id → real specialist objectiveId (objectiveId binding, §6). */
+  private stepObjective = new Map<string, string>();
   private seq = 0;
   private loaded = false;
   private readonly file: string;
@@ -239,6 +249,7 @@ export class MissionJournal {
     this.entries = [];
     this.byId.clear();
     this.actionEntries.clear();
+    this.stepObjective.clear();
     this.save();
     this.fire();
   }
@@ -259,6 +270,8 @@ export class MissionJournal {
       case 'memory-selected':       this.onMemorySelected(data); break;
       case 'browser-session':       this.onBrowserSession(data); break;
       case 'mission-progress':      this.onMissionProgress(data); break;
+      case 'specialist-assigned':   this.onSpecialistAssigned(data); break;
+      case 'specialist-result':     this.onSpecialistResult(data); break;
       case 'error':                 this.onError(data); break;
       case 'task-complete':         this.onTaskComplete(data); break;
       default: break;
@@ -343,6 +356,14 @@ export class MissionJournal {
     const state = String(data.state ?? '');
     const info = actionId ? this.steps.get(actionId) : undefined;
 
+    // objectiveId binding (§6): when the event carries a real specialist
+    // objective id, it is remembered per step so every journal line this
+    // action produces (ACTION/OBSERVATION/VERIFICATION) stays bound to
+    // the objective it belongs to.
+    const eventObjectiveId = data.objectiveId ? String(data.objectiveId) : undefined;
+    if (actionId && eventObjectiveId) this.stepObjective.set(actionId, eventObjectiveId);
+    const boundObjectiveId = eventObjectiveId
+      ?? (actionId ? this.stepObjective.get(actionId) : undefined);
     if (state === 'executing') {
       // The runtime announces execution more than once per step (announce +
       // body). ONE line per real action: update in place, never duplicate —
@@ -353,6 +374,7 @@ export class MissionJournal {
           status: 'RUNNING',
           action: tool,
           specialist: roleForTool(tool),
+          objectiveId: boundObjectiveId ?? this.byId.get(existing)?.objectiveId,
           taskId: info?.taskId ?? this.byId.get(existing)?.taskId,
           objective: info?.objective ?? this.byId.get(existing)?.objective,
           intent: info?.description ?? this.byId.get(existing)?.intent,
@@ -365,6 +387,7 @@ export class MissionJournal {
         actionId,
         action: tool,
         specialist: roleForTool(tool),
+        objectiveId: boundObjectiveId,
         taskId: info?.taskId,
         objective: info?.objective,
         intent: info?.description ?? clip(data.description, 300),
@@ -388,6 +411,7 @@ export class MissionJournal {
           status: 'RECOVERED',
           retries: (current?.retries ?? 0) + 1,
           recovery: 'bounded retry with backoff',
+          objectiveId: boundObjectiveId ?? current?.objectiveId,
         });
       }
       this.append({
@@ -396,6 +420,7 @@ export class MissionJournal {
         actionId,
         action: tool,
         specialist: roleForTool(tool),
+        objectiveId: boundObjectiveId,
         taskId: info?.taskId,
         objective: info?.objective,
         intent: info?.description,
@@ -416,7 +441,7 @@ export class MissionJournal {
         verification,
       };
       const existing = actionId ? this.actionEntries.get(actionId) : undefined;
-      if (existing) this.patch(existing, patch);
+      if (existing) this.patch(existing, { ...patch, objectiveId: boundObjectiveId ?? this.byId.get(existing)?.objectiveId });
       else {
         // Settled without an observed start (e.g. direct fast path): the
         // real action still belongs in the journal.
@@ -426,6 +451,7 @@ export class MissionJournal {
           actionId,
           action: tool,
           specialist: roleForTool(tool),
+          objectiveId: boundObjectiveId,
           taskId: info?.taskId,
           objective: info?.objective,
           intent: info?.description,
@@ -441,6 +467,7 @@ export class MissionJournal {
           actionId,
           action: tool,
           specialist: roleForTool(tool),
+          objectiveId: boundObjectiveId,
           taskId: info?.taskId,
           objective: info?.objective,
           intent: info?.description,
@@ -454,6 +481,7 @@ export class MissionJournal {
           actionId,
           action: tool,
           specialist: roleForTool(tool),
+          objectiveId: boundObjectiveId,
           taskId: info?.taskId,
           objective: info?.objective,
           intent: info?.description,
@@ -549,6 +577,54 @@ export class MissionJournal {
       replanBudget: typeof data.replanBudget === 'number' ? data.replanBudget : undefined,
       planChange: planChange ?? clip(data.replanPlanKey, 80),
       detail: clip(data.recoveryDetail, 300),
+    });
+  }
+
+  /**
+   * A real specialist-assigned event: work was DELEGATED to a bounded
+   * specialist objective. specialist = the PLANNED/assigned role.
+   */
+  private onSpecialistAssigned(data: any): void {
+    if (!data || typeof data !== 'object' || !data.objectiveId) return;
+    this.append({
+      kind: 'DELEGATED',
+      status: 'INFO',
+      objectiveId: String(data.objectiveId),
+      specialist: String(data.specialist ?? 'GENERAL'),
+      taskId: data.taskId ? String(data.taskId) : undefined,
+      objective: clip(data.objective, 300),
+      detail: `budgets: ${Number(data.budgets?.maxActions ?? 0)} action(s), ${Number(data.budgets?.maxRecoveries ?? 0)} recovery, ${Number(data.budgets?.maxReplans ?? 0)} replan, ${Math.round(Number(data.budgets?.deadlineMs ?? 0) / 1000)}s deadline`,
+    });
+  }
+
+  /**
+   * A real specialist-result event: the objective settled into its
+   * honest terminal state. specialist = the OBSERVED/result role; the
+   * verification level is recorded verbatim — UNVERIFIED stays UNVERIFIED.
+   */
+  private onSpecialistResult(data: any): void {
+    if (!data || typeof data !== 'object' || !data.objectiveId) return;
+    const verificationLevel = String(data.verification ?? 'UNVERIFIED');
+    const counts = [
+      `${Number(data.completedCount ?? 0)} completed`,
+      `${Number(data.verifiedCount ?? 0)} verified`,
+      Number(data.failedCount ?? 0) > 0 ? `${Number(data.failedCount)} failed` : null,
+      Number(data.deniedCount ?? 0) > 0 ? `${Number(data.deniedCount)} denied` : null,
+    ].filter(Boolean).join(', ');
+    this.append({
+      kind: 'RESULT',
+      status: data.status === 'COMPLETED_VERIFIED' || data.status === 'COMPLETED_PARTIAL'
+        ? 'COMPLETED'
+        : data.status === 'COMPLETED_UNVERIFIED'
+          ? 'UNVERIFIED'
+          : data.status === 'FAILED' || data.status === 'TIMED_OUT'
+            ? 'FAILED'
+            : data.status === 'BLOCKED' ? 'BLOCKED' : 'SKIPPED',
+      objectiveId: String(data.objectiveId),
+      specialist: String(data.role ?? 'GENERAL'),
+      taskId: data.taskId ? String(data.taskId) : undefined,
+      objective: clip(data.objective, 300),
+      detail: `specialist ${String(data.status)} — verification ${verificationLevel} (${counts})${data.deadlineExceeded ? ' — deadline exceeded' : ''}: ${clip(data.summary, 200) ?? ''}`.slice(0, 500),
     });
   }
 

@@ -140,12 +140,58 @@ export interface AgentReport {
   };
   blockers: string[];
   reportedAt: number;
+  /** Real specialist delegation of THIS run, when one existed (§6). */
+  specialist?: {
+    objectiveId: string;
+    specialist: string;
+    objective: string;
+    status: string;
+    verification: 'VERIFIED' | 'PARTIAL' | 'UNVERIFIED';
+    completedCount: number;
+    verifiedCount: number;
+    failedCount: number;
+    deniedCount: number;
+    deadlineExceeded: boolean;
+    durationMs: number;
+    summary: string;
+  };
+}
+
+/** Real specialist delegation state mirrored from the server (§6). */
+export interface SpecialistState {
+  objectiveId: string;
+  specialist: string;
+  objective: string;
+  taskId?: string;
+  status: string;
+  budgets: {
+    maxActions: number;
+    maxRecoveries: number;
+    maxReplans: number;
+    deadlineMs: number;
+  };
+  actionsUsed?: number;
+  recoveriesUsed?: number;
+  replansUsed?: number;
+  result?: {
+    status: string;
+    verification: 'VERIFIED' | 'PARTIAL' | 'UNVERIFIED';
+    completedCount: number;
+    verifiedCount: number;
+    failedCount: number;
+    deniedCount: number;
+    deadlineExceeded: boolean;
+    durationMs: number;
+    summary: string;
+  };
 }
 
 export interface JarvisSnapshot {
   phase: JarvisPhase;
   directive: JarvisDirective | null;
   lastReport: AgentReport | null;
+  /** Present only when a specialist objective really exists. */
+  specialist?: SpecialistState;
 }
 
 // ── Agency layer (real worker activations of the existing agent) ──

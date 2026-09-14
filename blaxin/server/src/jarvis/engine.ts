@@ -25,6 +25,7 @@ import type {
   ReportStep,
   JarvisPhase,
   JarvisSnapshot,
+  JarvisSpecialistState,
 } from './types.js';
 import { defaultAssessIntent, normalizeGoal, type IntentAssessor } from './intent.js';
 
@@ -90,6 +91,8 @@ export class JarvisEngine {
   private sawError = false;
   /** Real recovery state of the CURRENT run (classification/strategy/budget). */
   private currentRecovery: JarvisSnapshot['recovery'] | null = null;
+  /** Real specialist delegation of the CURRENT run (null = none delegated). */
+  private currentSpecialist: JarvisSpecialistState | null = null;
   /** Real checkpoint state of a PAUSED mission (mission-control reporting). */
   private lastMissionCheckpoint: AgentReport['missionCheckpoint'] | null = null;
 
@@ -114,6 +117,7 @@ export class JarvisEngine {
       directive: this.activeDirective,
       lastReport: this.lastReport,
       recovery: this.currentRecovery ?? undefined,
+      specialist: this.currentSpecialist ?? undefined,
     };
   }
 
@@ -193,6 +197,7 @@ export class JarvisEngine {
     this.pendingTerminalState = null;
     this.sawError = false;
     this.currentRecovery = null;
+    this.currentSpecialist = null;
 
     this.setPhase('delegated');
     logger.info('jarvis', `Routed (${directive.complexity}/${directive.reason}) → task ${taskId}`);
@@ -249,6 +254,12 @@ export class JarvisEngine {
         this.onMissionProgress(data);
         break;
       }
+      case 'specialist-assigned':
+        this.onSpecialistAssigned(data);
+        break;
+      case 'specialist-result':
+        this.onSpecialistResult(data);
+        break;
       default:
         break;
     }
@@ -445,6 +456,75 @@ export class JarvisEngine {
     }
   }
 
+  // ── Real specialist intake (§6) ─────────────────────────────────
+
+  /**
+   * A real specialist-assigned event: a tool activation claimed the
+   * task's objective under explicit budgets. No specialist block is
+   * ever shown without this real event.
+   */
+  private onSpecialistAssigned(data: any): void {
+    if (!data || typeof data !== 'object' || !data.objectiveId) return;
+    this.currentSpecialist = {
+      objectiveId: String(data.objectiveId),
+      specialist: String(data.specialist ?? 'GENERAL'),
+      objective: String(data.objective ?? '').slice(0, 300),
+      taskId: data.taskId ? String(data.taskId) : undefined,
+      status: String(data.status ?? 'ASSIGNED'),
+      budgets: {
+        maxActions: Number(data.budgets?.maxActions ?? 0),
+        maxRecoveries: Number(data.budgets?.maxRecoveries ?? 0),
+        maxReplans: Number(data.budgets?.maxReplans ?? 0),
+        deadlineMs: Number(data.budgets?.deadlineMs ?? 0),
+      },
+      actionsUsed: typeof data.actionsUsed === 'number' ? data.actionsUsed : undefined,
+      recoveriesUsed: typeof data.recoveriesUsed === 'number' ? data.recoveriesUsed : undefined,
+      replansUsed: typeof data.replansUsed === 'number' ? data.replansUsed : undefined,
+    };
+    this.emitChange();
+  }
+
+  /**
+   * A real specialist-result event: the objective settled into its
+   * honest terminal state. The result REPLACES the live block — and its
+   * verification level is carried verbatim: UNVERIFIED stays UNVERIFIED.
+   */
+  private onSpecialistResult(data: any): void {
+    if (!data || typeof data !== 'object' || !data.objectiveId) return;
+    const prev = this.currentSpecialist;
+    this.currentSpecialist = {
+      objectiveId: String(data.objectiveId),
+      specialist: String(data.role ?? prev?.specialist ?? 'GENERAL'),
+      objective: String(data.objective ?? prev?.objective ?? '').slice(0, 300),
+      taskId: data.taskId ? String(data.taskId) : prev?.taskId,
+      status: String(data.status ?? 'COMPLETED'),
+      budgets: prev?.budgets ?? {
+        maxActions: Number(data.budgets?.maxActions ?? 0),
+        maxRecoveries: Number(data.budgets?.maxRecoveries ?? 0),
+        maxReplans: Number(data.budgets?.maxReplans ?? 0),
+        deadlineMs: Number(data.budgets?.deadlineMs ?? 0),
+      },
+      actionsUsed: typeof data.actionsUsed === 'number' ? data.actionsUsed : prev?.actionsUsed,
+      recoveriesUsed: typeof data.recoveriesUsed === 'number' ? data.recoveriesUsed : prev?.recoveriesUsed,
+      replansUsed: typeof data.replansUsed === 'number' ? data.replansUsed : prev?.replansUsed,
+      result: {
+        status: String(data.status ?? 'COMPLETED'),
+        verification:
+          data.verification === 'VERIFIED' || data.verification === 'PARTIAL' || data.verification === 'UNVERIFIED'
+            ? data.verification
+            : 'UNVERIFIED', // honest default when evidence is missing — never upgraded
+        completedCount: Number(data.completedCount ?? 0),
+        verifiedCount: Number(data.verifiedCount ?? 0),
+        failedCount: Number(data.failedCount ?? 0),
+        deniedCount: Number(data.deniedCount ?? 0),
+        deadlineExceeded: data.deadlineExceeded === true,
+        durationMs: Number(data.durationMs ?? 0),
+        summary: String(data.summary ?? '').slice(0, 500),
+      },
+    };
+    this.emitChange();
+  }
+
   /**
    * Compose the report STRICTLY from collected real events. Order of
    * precedence for status: STOPPED (user stopped) > FAILED (agent
@@ -464,12 +544,23 @@ export class JarvisEngine {
     let status: AgentReportStatus;
     if (terminalState === 'idle') {
       status = 'STOPPED';
-    } else if (terminalState === 'error') {
-      status = 'FAILED';
-    } else if (failed.length > 0 || skipped.length > 0) {
-      status = 'PARTIAL';
     } else {
-      status = 'SUCCESS';
+      // HONEST verification capping (§6): a specialist objective whose
+      // evidence is UNVERIFIED can never report SUCCESS — the best it
+      // can honestly claim is PARTIAL. Tool invocation ≠ verification.
+      const sp = this.currentSpecialist?.result;
+      const unverifiedSpecialist = sp
+        && sp.status !== 'FAILED' && sp.status !== 'TIMED_OUT' && sp.status !== 'CANCELLED'
+        && sp.verification === 'UNVERIFIED';
+      if (terminalState === 'error') {
+        status = 'FAILED';
+      } else if (failed.length > 0 || skipped.length > 0) {
+        status = 'PARTIAL';
+      } else if (unverifiedSpecialist) {
+        status = 'PARTIAL';
+      } else {
+        status = 'SUCCESS';
+      }
     }
 
     const blockers = [
@@ -490,6 +581,19 @@ export class JarvisEngine {
       // mission store snapshot that just terminated). Nulls are honest:
       // a mission without checkpoints reports none.
       missionCheckpoint: this.lastMissionCheckpoint ?? undefined,
+      // Real specialist delegation of THIS run (when one existed). The
+      // verification level travels verbatim — UNVERIFIED is never
+      // upgraded anywhere downstream.
+      specialist: this.currentSpecialist
+        ? {
+            objectiveId: this.currentSpecialist.objectiveId,
+            specialist: this.currentSpecialist.specialist,
+            objective: this.currentSpecialist.objective,
+            ...(this.currentSpecialist.result
+              ? this.currentSpecialist.result
+              : { status: this.currentSpecialist.status, verification: 'UNVERIFIED' as const, completedCount: 0, verifiedCount: 0, failedCount: 0, deniedCount: 0, deadlineExceeded: false, durationMs: 0, summary: 'objective did not settle' }),
+          }
+        : undefined,
     };
     this.lastMissionCheckpoint = null;
 
@@ -510,6 +614,7 @@ export class JarvisEngine {
     this.pendingTerminalState = null;
     this.sawError = false;
     this.currentRecovery = null;
+    this.currentSpecialist = null;
     this.lastMissionCheckpoint = null;
     this.activeDirective = null;
     this.setPhase('idle');

@@ -23,12 +23,48 @@ import {
   classifyFailure, selectStrategy, synthesizeAlternatePlan, backoffFor, failureLabel,
   DEFAULT_RECOVERY_CONFIG, RecoveryConfig, FailureClass,
 } from './recovery-policy.js';
+import {
+  SpecialistLedger, SpecialistObjective, SpecialistResult, SpecialistConfig,
+  DEFAULT_SPECIALIST_CONFIG, VerificationLevel, SettleOptions,
+} from './specialist.js';
 
 type EventCallback = (event: string, data: any) => void;
 
 /** Local helper: steps that actually failed (failed = executed + errored). */
 function failedStepsOf(steps: TaskStep[]): TaskStep[] {
   return steps.filter((s) => s.state === 'failed');
+}
+
+/** Bounded text for evidence records (never unbounded). */
+function clipText(value: string | undefined, max: number): string | undefined {
+  if (!value) return undefined;
+  const s = value.replace(/\s+/g, ' ').trim();
+  if (!s) return undefined;
+  return s.length > max ? `${s.slice(0, max)}…` : s;
+}
+
+/** Read the tool's REAL verification payload off a result (never invented). */
+function readVerificationEvidence(result: ToolResult): { method: string; status: string; detail: string } | undefined {
+  const v = (result.data as Record<string, unknown> | undefined)?.verification as
+    | { method?: unknown; status?: unknown; detail?: unknown }
+    | undefined;
+  if (!v || typeof v !== 'object') return undefined;
+  const method = typeof v.method === 'string' ? v.method : '';
+  const status = typeof v.status === 'string' ? v.status : '';
+  if (!method || !status) return undefined;
+  return { method, status, detail: typeof v.detail === 'string' ? v.detail.slice(0, 400) : '' };
+}
+
+/** Honest refusal text for a blocked specialist action (budget/deadline). */
+function specialistRefusalReason(o: SpecialistObjective | null): string {
+  if (!o) return 'No specialist objective is active for this action.';
+  if (o.actionsUsed >= o.budgets.maxActions) {
+    return `Specialist action budget exhausted (${o.actionsUsed}/${o.budgets.maxActions}) — no further actions authorized.`;
+  }
+  if (Date.now() > o.expiresAt) {
+    return 'Specialist objective deadline exceeded — no further actions authorized.';
+  }
+  return 'The specialist objective is no longer active.';
 }
 
 // ── Injectable Dependencies ─────────────────────────────────────
@@ -290,9 +326,34 @@ export class AgentOrchestrator {
   private recoveryConfig: RecoveryConfig = { ...DEFAULT_RECOVERY_CONFIG };
   private replansUsedThisTask = 0;
 
+  // Specialist bounded-objective ownership (§6): the tool that actually
+  // activates first claims the task's objective under explicit budgets.
+  // Every important action stays attributable via the objectiveId; the
+  // result is honest (tool invocation ≠ verified outcome).
+  private specialist: SpecialistLedger = new SpecialistLedger();
+  /** The objective id whose specialist-assigned event was already emitted. */
+  private specialistObjectiveAnnounced: string | null = null;
+  /** Settled objective ids by step id (attribution after the result emits). */
+  private specialistResultOfStep = new Map<string, string>();
+
   /** Explicit, configurable recovery budgets (tests + deployment tuning). */
   setRecoveryConfig(partial: Partial<RecoveryConfig>): void {
     this.recoveryConfig = { ...this.recoveryConfig, ...partial };
+  }
+
+  /** Explicit, configurable specialist budgets (tests + deployment tuning). */
+  setSpecialistConfig(partial: Partial<SpecialistConfig>): void {
+    this.specialist.setConfig(partial);
+  }
+
+  /** The real specialist objective of the current task (null = none delegated). */
+  getCurrentSpecialistObjective(): SpecialistObjective | null {
+    return this.specialist.current();
+  }
+
+  /** Terminal specialist results, newest first (bounded). */
+  getSpecialistResults(limit = 20): SpecialistResult[] {
+    return this.specialist.listResults(limit);
   }
 
   /** Rendered directive context for the current run ('' = none). */
@@ -625,6 +686,8 @@ export class AgentOrchestrator {
     this.stepCount = 0;
     this.runObservations.clear();
     this.replansUsedThisTask = 0;
+    this.specialistObjectiveAnnounced = null;
+    this.specialistResultOfStep.clear();
 
     // Layered-memory advisory (§20+): ONLY task-relevant memory under a
     // hard budget enters the context — preferences always, everything
@@ -670,12 +733,64 @@ export class AgentOrchestrator {
     this.finishRunTask();
   }
 
+  /** True when the current task's specialist objective passed its deadline. */
+  private specialistDeadlinePassed(): boolean {
+    const o = this.specialist.current();
+    if (!o) return false;
+    if (Date.now() <= o.expiresAt) return false;
+    // Mark the real timeout on the objective itself (honest evidence).
+    o.deadlineExceeded = true;
+    return true;
+  }
+
+  /**
+   * Settle the task's specialist objective and emit the structured
+   * specialist-result event ONCE (additive, backward-compatible event).
+   * The status/verification come from the ledger's real evidence — the
+   * orchestrator never upgrades an unverified outcome.
+   */
+  private emitSpecialistResult(
+    taskId: string | undefined,
+    opts: { stopped?: boolean; reason?: SettleOptions['reason'] } = {},
+  ): SpecialistResult | null {
+    const result = this.specialist.settleTask(taskId, {
+      stopped: opts.stopped === true,
+      ...(opts.reason ? { reason: opts.reason } : {}),
+    });
+    if (!result) return null;
+    // Keep step → settled-objective attribution for later events.
+    const objective = this.specialist.get(result.objectiveId);
+    if (objective) {
+      for (const e of objective.evidence) {
+        this.specialistResultOfStep.set(e.stepId, result.objectiveId);
+      }
+    }
+    this.specialistObjectiveAnnounced = null;
+    this.emit('specialist-result', result);
+    return result;
+  }
+
   /**
    * Record durable lessons and close task timings after a run. Failed
    * actions are remembered so future tasks can avoid repeating them.
    * (Secrets are never stored.)
    */
   private finishRunTask(): void {
+    // Specialist result (§6): the objective settles into its honest
+    // terminal state EXACTLY once, at the end of the owning task — from
+    // real evidence, never from optimism. A deadline/loop abort carried
+    // in loopAbortReason is the REAL settle reason (the wall clock is a
+    // runtime boundary, not narrative) — the result must read TIMED_OUT,
+    // never a plain completion.
+    const stopped = this.runMetrics?.outcome === 'stopped';
+    const settleReason: SettleOptions['reason'] = this.loopAbortReason?.includes('deadline exceeded')
+      ? 'deadline-exceeded'
+      : undefined;
+    this.emitSpecialistResult(this.currentTask?.id, {
+      stopped: stopped === true,
+      ...(settleReason ? { reason: settleReason } : {}),
+    });
+
     // Skill context is scoped to ONE task — cleared after the run so the
     // next task (or queued message) re-selects against ITS objective.
     this.skillContext = '';
@@ -899,6 +1014,8 @@ export class AgentOrchestrator {
     this.stopRequested = false;
     this.runObservations.clear();
     this.replansUsedThisTask = 0;
+    this.specialistObjectiveAnnounced = null;
+    this.specialistResultOfStep.clear();
     this.setState('executing', action.summary);
 
     const toolCall: ToolCall = {
@@ -929,6 +1046,9 @@ export class AgentOrchestrator {
       return false;
     }
 
+    // Specialist result memory: after a direct-path failure the objective
+    // may already hold evidence; keep it attributed across the fallback.
+    const specialistObjId = this.getCurrentSpecialistObjective()?.id;
     // Confirmation gate (identical policy to the LLM path).
     const decision = await this.checkConfirmationGate(pc, config);
     if (decision.outcome === 'denied') {
@@ -964,10 +1084,19 @@ export class AgentOrchestrator {
         error: result.error?.slice(0, 400),
         verification: result.data?.verification,
         stepId: pc.step.id,
+        objectiveId: this.objectiveIdFor(pc.step.id),
       });
       // Failed deterministic action: roll back this attempt entirely and
       // let the LLM loop diagnose/recover (it may explain or adapt).
       this.rollbackDirect(historyMark);
+      // The direct attempt did NOT settle the task (the LLM path takes
+      // over): detach the objective pointer so the SAME task can re-claim
+      // or re-attribute, without emitting a premature result.
+      this.specialist.detachCurrent();
+      if (specialistObjId) {
+        const o = this.specialist.get(specialistObjId);
+        if (o) for (const e of o.evidence) this.specialistResultOfStep.set(e.stepId, specialistObjId);
+      }
       return false;
     }
 
@@ -1033,6 +1162,14 @@ export class AgentOrchestrator {
     providerId?: ProviderId,
   ): Promise<void> {
     while (this.stepCount < maxSteps && !this.stopRequested && !this.loopAbortReason) {
+      // Specialist deadline (§6): a delegated objective expires on the
+      // wall clock. Past the deadline the loop stops honestly — remaining
+      // steps are not attempted, and the result will settle TIMED_OUT.
+      if (this.specialistDeadlinePassed()) {
+        this.loopAbortReason = 'specialist objective deadline exceeded';
+        logger.warn('orchestrator', `Loop aborted: ${this.loopAbortReason}`);
+        break;
+      }
       this.stepCount++;
 
       // Build messages for the AI with improved context management
@@ -1172,6 +1309,15 @@ export class AgentOrchestrator {
           throw error;
         }
       }
+    }
+
+    // Reached max steps — when a specialist objective is still active and
+    // its deadline has passed, the wall-clock boundary is real: the
+    // objective settles TIMED_OUT (finishRunTask maps loopAbortReason, and
+    // specialistDeadlinePassed marks the objective itself). It must never
+    // surface as a plain step-limit completion.
+    if (this.specialistDeadlinePassed()) {
+      this.loopAbortReason = this.loopAbortReason ?? 'specialist objective deadline exceeded';
     }
 
     // Reached max steps
@@ -1426,6 +1572,8 @@ export class AgentOrchestrator {
       logger.warn('orchestrator', `Failed to parse tool arguments for ${toolName}`);
     }
 
+    this.ensureSpecialistObjective(toolName);
+
     const config = this.configOf();
     const needsConfirmation = this.stepNeedsConfirmation(toolName, toolArgs, config);
     const step: ExecutionStep = {
@@ -1452,6 +1600,51 @@ export class AgentOrchestrator {
     }
 
     return { call: toolCall, args: toolArgs, step };
+  }
+
+  // ── Specialist bounded-objective ownership (§6) ─────────────
+
+  /**
+   * Claim the task's specialist objective from a REAL tool activation.
+   * The first tool prepared for the task activates its role (explicit
+   * ownership — the ledger is idempotent per task); a task with no tool
+   * work never gets a specialist.
+   */
+  private ensureSpecialistObjective(toolName: string): void {
+    const objective = this.specialist.assign({
+      tool: toolName,
+      objective: this.currentTask?.instruction || this.currentPlan?.objective || '',
+      taskId: this.currentTask?.id,
+      maxReplansOverride: this.recoveryConfig.maxReplansPerTask,
+    });
+    // Announce the delegation exactly once (the ledger dedupes per task).
+    if (this.specialistObjectiveAnnounced !== objective.id) {
+      this.specialistObjectiveAnnounced = objective.id;
+      this.emit('specialist-assigned', {
+        objectiveId: objective.id,
+        specialist: objective.role,
+        tool: objective.tool,
+        objective: objective.objective,
+        taskId: objective.taskId,
+        budgets: { ...objective.budgets },
+        createdAt: objective.createdAt,
+        expiresAt: objective.expiresAt,
+      });
+    }
+  }
+
+  /** The objectiveId that owns a step (for attribution + journaling). */
+  private objectiveIdFor(stepId: string): string | undefined {
+    const o = this.specialist.current();
+    return o ? o.id : this.specialistResultOfStep.get(stepId);
+  }
+
+  /** Real specialist snapshot for external observers (null = no delegation). */
+  getSpecialistSnapshot(): SpecialistObjective | SpecialistResult | null {
+    const current = this.specialist.current();
+    if (current) return current;
+    const last = this.specialist.listResults(1)[0];
+    return last ?? null;
   }
 
   /**
@@ -1529,7 +1722,20 @@ export class AgentOrchestrator {
       state: 'skipped',
       result: 'Denied by user',
       stepId: step.id,
+      objectiveId: this.objectiveIdFor(step.id),
     });
+    // The specialist was really blocked by the gate — honest BLOCKED evidence.
+    const deniedObjId = this.objectiveIdFor(step.id);
+    if (deniedObjId) {
+      this.specialist.recordDenied(deniedObjId, step.id, call.function.name);
+      this.specialist.recordEvidence(deniedObjId, {
+        at: Date.now(),
+        stepId: step.id,
+        tool: call.function.name,
+        outcome: 'skipped',
+        detail: 'denied by user (policy gate)',
+      });
+    }
     const deniedMsg: ChatMessage = {
       id: uuidv4(),
       role: 'tool',
@@ -1548,7 +1754,12 @@ export class AgentOrchestrator {
     this.setState('executing', pc.step.description);
     // stepId is the real runtime identity of this step: consumers (e.g.
     // the agency registry) can correlate start→settle for the SAME call.
-    this.emit('tool-execution', { toolName, args: pc.args, state: 'executing', stepId: pc.step.id });
+    // objectiveId travels on EVERY announcement — specialist-owned steps
+    // stay attributable from the very first executing event (§6).
+    this.emit('tool-execution', {
+      toolName, args: pc.args, state: 'executing', stepId: pc.step.id,
+      objectiveId: this.objectiveIdFor(pc.step.id),
+    });
     this.emit('activity', { type: 'executing', content: pc.step.description });
   }
 
@@ -1581,10 +1792,39 @@ export class AgentOrchestrator {
     const toolName = pc.call.function.name;
     const config = this.configOf();
 
+    // Specialist budget gate (§6): a real action only starts when its
+    // objective's action budget holds and the deadline has not passed.
+    // The call is honestly refused (skipped), never silently unbounded.
+    const objId = this.objectiveIdFor(pc.step.id);
+    if (objId && !this.specialist.actionAllowed(objId)) {
+      const o = this.specialist.get(objId);
+      const refusal = specialistRefusalReason(o);
+      pc.step.state = 'skipped';
+      pc.step.error = refusal;
+      pc.step.endTime = Date.now();
+      this.emit('tool-execution', {
+        toolName,
+        args: pc.args,
+        state: 'skipped',
+        result: refusal,
+        stepId: pc.step.id,
+        objectiveId: objId,
+      });
+      if (objId) this.specialist.recordEvidence(objId, {
+        at: Date.now(),
+        stepId: pc.step.id,
+        tool: toolName,
+        outcome: 'skipped',
+        detail: refusal,
+      });
+      return { success: false, output: '', error: refusal };
+    }
+    if (objId) this.specialist.recordAction(objId);
+
     // Immediate feedback + visible activity row.
     pc.step.state = 'executing';
     pc.step.startTime = Date.now();
-    this.emit('tool-execution', { toolName, args: pc.args, state: 'executing', stepId: pc.step.id });
+    this.emit('tool-execution', { toolName, args: pc.args, state: 'executing', stepId: pc.step.id, objectiveId: objId });
 
     // Legacy transient-retry budget (behavior preserved): the first
     // failure may retry within maxRetries when the error is retryable.
@@ -1598,7 +1838,7 @@ export class AgentOrchestrator {
       pc.step.state = 'retrying';
       pc.step.attempts++;
       logger.info('orchestrator', `Retrying tool ${toolName} (attempt ${retries + 1})`);
-      this.emit('tool-execution', { toolName, args: pc.args, state: 'retrying', stepId: pc.step.id });
+      this.emit('tool-execution', { toolName, args: pc.args, state: 'retrying', stepId: pc.step.id, objectiveId: objId });
       this.emit('activity', { type: 'retrying', content: `Retrying ${toolName} (attempt ${retries + 1})...` });
       await this.sleep(1000 * retries); // Exponential backoff
       result = await this.toolRegistry.execute(toolName, pc.args);
@@ -1629,22 +1869,31 @@ export class AgentOrchestrator {
 
       // Emit the recovery ATTEMPT first (the journal records the real
       // classification + strategy), then execute it.
+      const recoveryPermitted = !objId || this.specialist.recoveryAllowed(objId);
       this.emit('tool-execution', {
         toolName,
         args: pc.args,
         state: 'retrying',
         stepId: pc.step.id,
+        objectiveId: objId,
         failureClass: cls,
         failureLabel: label,
         recoveryStrategy: selection.strategy,
         recoveryAttempt: attempt,
         recoveryBudget: this.recoveryConfig.maxRecoveryAttempts + 1,
-        recoveryDetail: selection.correctiveAction,
+        recoveryDetail: recoveryPermitted ? selection.correctiveAction : 'recovery budget exhausted — escalation',
       });
       this.emit('activity', {
         type: 'recovering',
         content: `Recovering ${toolName} (${cls}, ${selection.strategy}, attempt ${attempt})`,
       });
+
+      if (!recoveryPermitted) {
+        // The specialist's recovery budget is spent: escalate honestly
+        // (the result stays failed and reaches the Brain / result).
+        break;
+      }
+      if (objId) this.specialist.recordRecovery(objId);
 
       if (selection.strategy === 'bounded-retry-backoff') {
         await this.sleep(backoffFor(attempt, this.recoveryConfig));
@@ -1683,6 +1932,19 @@ export class AgentOrchestrator {
     }
 
     pc.step.endTime = Date.now();
+
+    // Settled evidence feeds the objective's honest verification state.
+    if (objId) {
+      this.specialist.recordEvidence(objId, {
+        at: Date.now(),
+        stepId: pc.step.id,
+        tool: toolName,
+        outcome: result.success ? 'completed' : 'failed',
+        result: clipText(result.output, 300),
+        error: clipText(result.error, 300),
+        verification: readVerificationEvidence(result),
+      });
+    }
     return result;
   }
 
@@ -1715,6 +1977,11 @@ export class AgentOrchestrator {
     if (this.stopRequested || this.loopAbortReason) return result;
     if (this.replansUsedThisTask >= this.recoveryConfig.maxReplansPerTask) return result;
 
+    // Specialist re-plan budget (§6): the objective bounds plan mutations
+    // too — the policy budget and the specialist budget are both hard.
+    const replanObjId = this.objectiveIdFor(pc.step.id);
+    if (replanObjId && !this.specialist.replanAllowed(replanObjId)) return result;
+
     const toolName = pc.call.function.name;
     const cls = classifyFailure(
       toolName,
@@ -1728,6 +1995,7 @@ export class AgentOrchestrator {
 
     this.replansUsedThisTask++;
     const planNo = this.replansUsedThisTask;
+    if (replanObjId) this.specialist.recordReplan(replanObjId);
     logger.info('orchestrator', `Deterministic re-plan ${planNo}: ${plan.description}`);
 
     // Real plan mutation, announced as REPLAN: old strategy → new plan.
@@ -1736,6 +2004,7 @@ export class AgentOrchestrator {
       args: pc.args,
       state: 'retrying',
       stepId: pc.step.id,
+      objectiveId: replanObjId,
       failureClass: cls,
       recoveryStrategy: 'replan',
       replanNumber: planNo,
@@ -1820,6 +2089,7 @@ export class AgentOrchestrator {
       // journal and HUD record HOW the outcome was verified, never a claim.
       verification: result.data?.verification,
       stepId: step.id,
+      objectiveId: this.objectiveIdFor(step.id),
     });
     if (this.currentPlan && this.currentTask) {
       this.emit('task-progress', { ...this.currentTask, steps: [...this.currentTask.steps] });
@@ -2061,6 +2331,9 @@ export class AgentOrchestrator {
     this.repeatedActionCount = 0;
     this.lastActionFingerprint = '';
     this.loopAbortReason = null;
+    this.specialist.clear();
+    this.specialistObjectiveAnnounced = null;
+    this.specialistResultOfStep.clear();
     this.session.clearHistory();
     // Clearing history also forgets all remembered approvals.
     this.grants.clearAll();

@@ -50,9 +50,17 @@ const STEP_GLYPH: Record<string, string> = {
   pending: '○',
 };
 
+/** Honest verification colors — UNVERIFIED is a first-class state. */
+const VERIFICATION_COLOR: Record<string, string> = {
+  VERIFIED: 'var(--jh-ok, #35e08f)',
+  PARTIAL: 'var(--jh-warn, #ffc857)',
+  UNVERIFIED: 'var(--jh-warn, #ffc857)',
+};
+
 export function JarvisPanel() {
   const jarvis = useAppStore((s) => s.jarvis);
   const { phase, directive, lastReport } = jarvis;
+  const specialist = jarvis.specialist;
 
   const routeLabel = directive
     ? `${directive.complexity.toUpperCase()} · ${directive.reason}`
@@ -95,6 +103,35 @@ export function JarvisPanel() {
         </div>
       )}
 
+      {/* Real specialist delegation — rendered ONLY when the server's
+          snapshot actually carries one (no decorative specialist data). */}
+      {specialist && (
+        <div className="jh-jarvis-specialist" data-testid="jarvis-specialist">
+          <div className="jh-jarvis-specialist-role">
+            SPECIALIST: {specialist.specialist}
+            <span style={{ color: 'var(--jh-dim, #7d8aa5)' }}> · {specialist.status}</span>
+          </div>
+          {specialist.objective && (
+            <div className="jh-jarvis-specialist-objective" title={specialist.objective}>
+              {specialist.objective}
+            </div>
+          )}
+          <div className="jh-jarvis-specialist-budget">
+            actions {specialist.actionsUsed ?? 0}/{specialist.budgets.maxActions}
+            {' · '}recovery {specialist.recoveriesUsed ?? 0}/{specialist.budgets.maxRecoveries}
+            {' · '}replan {specialist.replansUsed ?? 0}/{specialist.budgets.maxReplans}
+          </div>
+          {specialist.result && (
+            <div className="jh-jarvis-specialist-result" data-testid="jarvis-specialist-result">
+              <span style={{ color: VERIFICATION_COLOR[specialist.result.verification] ?? undefined }}>
+                {specialist.result.status} · {specialist.result.verification}
+              </span>
+              {' — '}{specialist.result.summary}
+            </div>
+          )}
+        </div>
+      )}
+
       {/* Last honest report — only when one exists. */}
       {lastReport && (
         <div className="jh-jarvis-report" data-testid="jarvis-report">
@@ -125,6 +162,15 @@ export function JarvisPanel() {
             <div className="jh-jarvis-metrics" data-testid="jarvis-execution-mode">
               {metrics.totalMs}ms · {metrics.modelCalls} model call(s) · {metrics.toolCalls} tool call(s)
               {' · '}{EXEC_MODE_LABEL[execMode ?? ''] ?? execMode}
+            </div>
+          )}
+
+          {/* Real specialist result bound to THIS report (§6). */}
+          {lastReport.specialist && (
+            <div className="jh-jarvis-report-specialist" data-testid="jarvis-report-specialist">
+              <span style={{ color: VERIFICATION_COLOR[lastReport.specialist.verification] ?? undefined }}>
+                {lastReport.specialist.specialist}: {lastReport.specialist.status} · {lastReport.specialist.verification}
+              </span>
             </div>
           )}
         </div>
