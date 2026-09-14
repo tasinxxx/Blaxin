@@ -1,5 +1,111 @@
 # BLAXIN Engineering Mission — Continuation State
 
+## SESSION — SPECIALIST BOUNDED-OBJECTIVE OWNERSHIP COMPLETE (2026-09-14, PART 15)
+
+Resumed the specialist-ownership implementation exactly where Part 14's
+continuation state left it: focused suite 16/24, architecture already in
+place (uncommitted). NO redesign, NO restart — state reconstructed first
+(git status/log, CONTINUATION-STATE, specialist.ts, orchestrator wiring,
+jarvis engine, journal, test file), then the 8 failures were ROOT-CAUSED
+one by one and the suite completed.
+
+### Failure audit → classification (the honest table)
+1. "one objective per task from the first REAL tool activation" →
+   **INVALID TEST EXPECTATION**. `getCurrentSpecialistObjective()` is
+   null AFTER settlement BY DESIGN (the objective is no longer active;
+   the previous session's probe had already shown `current: null`). The
+   prior session's own runtime probe (`assigned: 1, results: 1`) was
+   right. Test now proves ownership via the settled result (same
+   objectiveId as the assignment event, real objective text).
+2. "hard action limit → expected FAILED, got COMPLETED_UNVERIFIED" →
+   **REAL BUG**. The runtime honestly refused the over-budget action
+   (skipped event + evidence) but settlement IGNORED refusal evidence —
+   the objective settled as a plain UNVERIFIED completion. Fixed in the
+   ledger: refusal evidence (`budget exhausted` / `deadline exceeded`
+   detail) now drives settlement — budget exhaustion FAILS the objective
+   (honest, and never erases genuine VERIFIED work: FAILED only when
+   nothing verified; verification stays evidence-based, not punitive).
+3. "wall-clock deadline → expected TIMED_OUT, got COMPLETED_UNVERIFIED" →
+   **TEST FIXTURE** (deadline never actually expired mid-run: the sleep
+   was before the run and the stub tool was instant) + **REAL GAP** (the
+   orchestrator had no honest settle reason mapping for a deadline loop
+   abort). Fixture now binds the deadline mid-run (sleeping tool, real
+   elapsed > 30ms budget, second turn refused); production now maps
+   `loopAbortReason` containing 'deadline exceeded' → settle reason
+   'deadline-exceeded' (wall clock is a runtime boundary, not narrative),
+   and the max-steps exit marks a passed deadline too.
+4. "executing/retrying/settled events carry objectiveId" → **REAL BUG**:
+   `announceExecution` (the documented second executing announcement)
+   emitted WITHOUT objectiveId. Fixed — objectiveId now travels on EVERY
+   tool-execution event from the very first executing announcement.
+5. "UNVERIFIED caps Jarvis report at PARTIAL" → **INVALID FIXTURE ORDER**:
+   the test emitted `specialist-result` AFTER `task-complete`, but the
+   real runtime order is result → task-complete (re-probed live). The
+   engine's in-compose cap is correct; fixture aligned to the real order.
+6. "VERIFIED keeps clean SUCCESS" → same fixture issue + the test never
+   emitted `specialist-assigned` (the report's specialist block comes
+   from real events only — correct behavior). Fixture fixed, not
+   production weakened: VERIFIED keeps SUCCESS, UNVERIFIED caps PARTIAL.
+7. "settle is idempotent" → **REAL BUG (minor)**: `settle()` deleted the
+   byTask mapping, so a later `settleTask` returned null instead of the
+   SAME first result. Fixed: the task→objective binding survives
+   settlement as the idempotency anchor (dies with its objective in
+   trim() — no unbounded growth, first settlement wins exactly once).
+8. "specialist snapshot fields mirror the real objective" → **MISSING
+   FIXTURE**: the test never ran a task (no tool work → no specialist —
+   the ownership contract itself). Now runs a real task and asserts the
+   settled result's budgets/usage/status/duration + snapshot accessor.
+
+### No second propagation/settlement system was created
+All fixes are inside the existing ledger/orchestrator/jarvis architecture
+(recovery ladder d47b5d4 untouched and still green under objectives).
+
+### Verification this phase (evidence, no claims)
+- Focused specialist-ownership suite: **24/24 PASS** (1.0s).
+- Related suites: deterministic-recovery 11 + recovery-policy 32 +
+  mission-journal 11 + mission-journal-recovery 4 + jarvis-engine 31 =
+  **91/91 PASS**.
+- FULL server suite: **724 passed / 12 skipped / 0 failed** (699 → 724;
+  skips = env-gated real-Chrome/live-desktop/live-LLM). Server
+  `tsc --noEmit` clean.
+- Client `tsc -b` clean + `vite build` clean (5.0s).
+- E2E (real backend + vite + real Chrome): **8/8 PASS (21.8s)** on the
+  second run (first run hit the known vite-ws warmup flake class; the
+  re-run is the documented baseline).
+- **REAL RUNTIME PROOF (Phase 11)**: real server (v1.4.0, port 3210,
+  scratch data dir) + real WS task "list the contents of /tmp" → full
+  honest trail: `specialist-assigned` obj_5c3e3b08 FILES (from the real
+  filesystem activation, budgets {16 actions, 8 recovery, 1 replan,
+  300s}) → `tool-execution` executing/executing/completed ALL carrying
+  objectiveId → `specialist-result` COMPLETED_UNVERIFIED / verification
+  UNVERIFIED (filesystem list carries no verification payload — honest,
+  no inflation) → `task-complete` DETERMINISTIC 21ms 0 model calls.
+  Journal (persisted, seq-ordered): DELEGATED(budgets) → ACTION
+  COMPLETED(objectiveId-bound, real /tmp listing) → OBSERVATION → PLAN →
+  RESULT UNVERIFIED(specialist FILES) → RESULT COMPLETED.
+- Commit: **a276451** — pushed to origin/main (f7c923b..a276451).
+  v1.4.0 remains UNTAGGED.
+
+### Honest remaining gaps
+- The real-runtime proof shows the UNVERIFIED case (filesystem has no
+  verification payload by design); the VERIFIED terminal state is proven
+  by the deterministic suite (real SUCCESS evidence → COMPLETED_VERIFIED)
+  and by browser tools' verification-in-depth in production, but a live
+  verified-browser specialist run was not driven this session.
+- `specialist-assigned` actionsUsed/recoveriesUsed/replansUsed are
+  undefined at assignment (they are 0 by definition then) — the HUD uses
+  the result event for live counts; no drift observed.
+
+### NEXT IMPLEMENTATION TARGET
+1. **Live VERIFIED specialist proof**: drive one real browser task
+   (env-gated) so a specialist objective settles COMPLETED_VERIFIED from
+   real browser verification evidence end to end (events + journal).
+2. Wire the specialist budgets into the config surface (defaults are
+   code constants today; setSpecialistConfig exists for tests/ops).
+3. v1.4.0 tag remains deferred until the agreed scope is verified.
+
+---
+
 ## SESSION — BOUNDED DETERMINISTIC AUTO-RECOVERY / RE-PLANNING (2026-09-14, PART 14)
 
 Continued per the continuation directive (inspect first, no reset, no
