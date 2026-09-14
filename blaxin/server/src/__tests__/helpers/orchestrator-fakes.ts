@@ -174,9 +174,10 @@ export class StubTool implements Tool {
 }
 
 export class FakeToolRegistry implements ToolRegistryLike {
-  private tools = new Map<string, StubTool>();
+  /** Any Tool-shaped fake may register (tests use specialized stubs). */
+  private tools = new Map<string, Tool>();
 
-  register(tool: StubTool): void {
+  register(tool: Tool): void {
     this.tools.set(tool.name, tool);
   }
 
@@ -196,7 +197,8 @@ export class FakeToolRegistry implements ToolRegistryLike {
 
   requiresConfirmation(name: string, args: Record<string, unknown>): boolean {
     const tool = this.tools.get(name);
-    return tool?.requiresConfirmation(args) ?? false;
+    if (!tool?.requiresConfirmation) return false;
+    return tool.requiresConfirmation(args);
   }
 
   getExecutionMode(name: string): 'parallel' | 'serial' {

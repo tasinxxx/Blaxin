@@ -88,6 +88,8 @@ export class JarvisEngine {
   private pendingTerminalState: string | null = null;
   /** True when a real 'error' event arrived during the current run. */
   private sawError = false;
+  /** Real recovery state of the CURRENT run (classification/strategy/budget). */
+  private currentRecovery: JarvisSnapshot['recovery'] | null = null;
   /** Real checkpoint state of a PAUSED mission (mission-control reporting). */
   private lastMissionCheckpoint: AgentReport['missionCheckpoint'] | null = null;
 
@@ -111,6 +113,7 @@ export class JarvisEngine {
       phase: this.phase,
       directive: this.activeDirective,
       lastReport: this.lastReport,
+      recovery: this.currentRecovery ?? undefined,
     };
   }
 
@@ -189,6 +192,7 @@ export class JarvisEngine {
     this.completionMetrics = null;
     this.pendingTerminalState = null;
     this.sawError = false;
+    this.currentRecovery = null;
 
     this.setPhase('delegated');
     logger.info('jarvis', `Routed (${directive.complexity}/${directive.reason}) → task ${taskId}`);
@@ -262,6 +266,25 @@ export class JarvisEngine {
         this.setPhase('blocked');
       } else if (event === 'tool-execution' && data?.state === 'retrying') {
         this.setPhase('recovering');
+        // Real recovery bookkeeping: classification + strategy + where we
+        // are in the explicit budget — never a decorative animation.
+        if (data.failureClass || data.replanNumber) {
+          this.currentRecovery = {
+            failureClass: data.failureClass ? String(data.failureClass) : undefined,
+            strategy: data.recoveryStrategy ? String(data.recoveryStrategy) : (data.replanNumber ? 'replan' : undefined),
+            attempt: typeof data.recoveryAttempt === 'number' ? data.recoveryAttempt : undefined,
+            budget: typeof data.recoveryBudget === 'number'
+              ? data.recoveryBudget
+              : typeof data.replanBudget === 'number' ? data.replanBudget : undefined,
+            replan: data.replanNumber ? {
+              number: Number(data.replanNumber),
+              budget: Number(data.replanBudget ?? 0),
+              planChange: data.replanDescription
+                ? `${String(data.oldStrategy ?? 'original plan')} → ${String(data.replanDescription)}`
+                : data.replanPlanKey ? String(data.replanPlanKey) : undefined,
+            } : undefined,
+          };
+        }
       } else if (event === 'browser-session') {
         // A real browser desync puts the run into RECOVERING (the session
         // layer then reconnects/reacquires). Recovery is never a success
@@ -270,9 +293,11 @@ export class JarvisEngine {
       }
     }
 
-    // Terminal agent-state is remembered, not reported on yet.
+    // Terminal agent-state is remembered, not reported on yet. Recovery
+    // state clears with the run — the HUD never shows stale recovering.
     if (event === 'agent-state' && data?.state && ['completed', 'error', 'idle'].includes(data.state)) {
       this.pendingTerminalState = data.state;
+      this.currentRecovery = null;
     }
   }
 
@@ -484,6 +509,7 @@ export class JarvisEngine {
     this.completionMetrics = null;
     this.pendingTerminalState = null;
     this.sawError = false;
+    this.currentRecovery = null;
     this.lastMissionCheckpoint = null;
     this.activeDirective = null;
     this.setPhase('idle');

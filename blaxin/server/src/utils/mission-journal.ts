@@ -35,6 +35,7 @@ export type JournalKind =
   | 'OBSERVATION'
   | 'VERIFICATION'
   | 'RECOVERY'
+  | 'REPLAN'
   | 'MEMORY'
   | 'RESULT';
 
@@ -80,6 +81,18 @@ export interface JournalEntry {
   verification?: JournalVerification;
   /** Real retry count observed for this action. */
   retries?: number;
+  /** REAL failure class (recovery-policy classification), when classified. */
+  failureClass?: string;
+  /** The deterministic recovery strategy that was selected/run. */
+  recoveryStrategy?: string;
+  /** Recovery attempt number and the budget it operates within. */
+  recoveryAttempt?: number;
+  recoveryBudget?: number;
+  /** Re-plan number/budget when this entry records a deterministic re-plan. */
+  replanNumber?: number;
+  replanBudget?: number;
+  /** The NEW plan: what changed in the executable strategy (old → new). */
+  planChange?: string;
   /** Real failure reason (tool error), when the action failed. */
   failure?: string;
   /** Real recovery action taken after a failure/desync. */
@@ -250,6 +263,17 @@ export class MissionJournal {
       case 'task-complete':         this.onTaskComplete(data); break;
       default: break;
     }
+    // A re-plan is announced on the tool-execution channel (state
+    // 'retrying' with a real replan payload) — recorded as its own line.
+    if (event === 'tool-execution' && data?.state === 'retrying' && data?.replanNumber) {
+      this.onReplan(data);
+    }
+    // A deterministic recovery attempt is a tool-execution 'retrying'
+    // event carrying a REAL failure classification — evidence, not noise.
+    // Re-plan payloads also carry a class but are recorded by onReplan.
+    if (event === 'tool-execution' && data?.state === 'retrying' && data?.failureClass && !data?.replanNumber) {
+      this.onDeterministicRecovery(data);
+    }
   }
 
   /** The REAL routing decision Jarvis made for a user command. */
@@ -351,6 +375,11 @@ export class MissionJournal {
     }
 
     if (state === 'retrying') {
+      // Deterministic recovery / re-plan events carry their own typed
+      // payloads (failureClass / replanNumber) — handled by their own
+      // recorders so the generic retry line below stays for the legacy
+      // transient path (behavior preserved).
+      if (data.failureClass || data.replanNumber) return;
       // A retry is a REAL recovery action — never silent.
       const existing = actionId ? this.actionEntries.get(actionId) : undefined;
       if (existing) {
@@ -464,6 +493,62 @@ export class MissionJournal {
       objective: info?.objective,
       intent: info?.description ?? clip(data.description, 300),
       failure: 'awaiting user authorization (policy gate)',
+    });
+  }
+
+  /**
+   * A DETERMINISTIC recovery attempt: classified from real evidence, a
+   * safe strategy, a real attempt number within an explicit budget.
+   * RECOVERING while it runs; the settled action line carries the
+   * outcome — never a success claim here.
+   */
+  private onDeterministicRecovery(data: any): void {
+    const actionId = data.stepId ? String(data.stepId) : undefined;
+    const info = actionId ? this.steps.get(actionId) : undefined;
+    const strategy = String(data.recoveryStrategy ?? 'recovery');
+    this.append({
+      kind: 'RECOVERY',
+      status: 'RECOVERING',
+      actionId,
+      action: String(data.toolName ?? 'unknown'),
+      specialist: roleForTool(String(data.toolName ?? '')),
+      taskId: info?.taskId ?? (data.taskId ? String(data.taskId) : undefined),
+      objective: info?.objective,
+      intent: info?.description,
+      failureClass: clip(data.failureClass, 40),
+      recoveryStrategy: strategy,
+      recoveryAttempt: typeof data.recoveryAttempt === 'number' ? data.recoveryAttempt : undefined,
+      recoveryBudget: typeof data.recoveryBudget === 'number' ? data.recoveryBudget : undefined,
+      recovery: clip(data.recoveryDetail, 200) ?? strategy,
+      failure: clip(data.failureLabel, 300) ?? clip(data.error, 300),
+    });
+  }
+
+  /**
+   * A deterministic RE-PLAN: the next executable action sequence really
+   * changed (old strategy → new plan). Records the classification, the
+   * plan change, and the budget position — from the real event payload.
+   */
+  private onReplan(data: any): void {
+    const actionId = data.stepId ? String(data.stepId) : undefined;
+    const info = actionId ? this.steps.get(actionId) : undefined;
+    const planChange = data.replanDescription
+      ? `${clip(data.oldStrategy, 120) ?? 'original plan'} → ${clip(data.replanDescription, 260)}`
+      : undefined;
+    this.append({
+      kind: 'REPLAN',
+      status: 'RUNNING',
+      actionId,
+      action: String(data.toolName ?? 'unknown'),
+      specialist: roleForTool(String(data.toolName ?? '')),
+      taskId: info?.taskId ?? (data.taskId ? String(data.taskId) : undefined),
+      objective: info?.objective,
+      intent: info?.description,
+      failureClass: clip(data.failureClass, 40),
+      replanNumber: typeof data.replanNumber === 'number' ? data.replanNumber : undefined,
+      replanBudget: typeof data.replanBudget === 'number' ? data.replanBudget : undefined,
+      planChange: planChange ?? clip(data.replanPlanKey, 80),
+      detail: clip(data.recoveryDetail, 300),
     });
   }
 

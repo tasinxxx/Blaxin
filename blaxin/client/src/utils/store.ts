@@ -194,7 +194,7 @@ export type VoiceState =
 export interface ActivityLine {
   id: string;
   time: number;
-  kind: 'state' | 'tool' | 'think' | 'reply' | 'user' | 'error' | 'info';
+  kind: 'state' | 'tool' | 'think' | 'reply' | 'user' | 'error' | 'info' | 'recovery';
   text: string;
 }
 

@@ -32,13 +32,14 @@ const KIND_COLOR: Record<string, string> = {
   OBSERVATION: 'var(--text-secondary)',
   VERIFICATION: 'var(--accent-green)',
   RECOVERY: 'var(--accent-yellow)',
+  REPLAN: 'var(--accent-secondary)',
   MEMORY: 'var(--accent-secondary)',
   RESULT: 'var(--text-primary)',
 };
 
 const ALL_KINDS: JournalKind[] = [
   'COMMAND', 'ROUTER', 'PLAN', 'ACTION', 'OBSERVATION',
-  'VERIFICATION', 'RECOVERY', 'MEMORY', 'RESULT',
+  'VERIFICATION', 'RECOVERY', 'REPLAN', 'MEMORY', 'RESULT',
 ];
 
 function timeString(at: number): string {
@@ -197,6 +198,14 @@ export function JournalPage() {
               {e.retries !== undefined && e.retries > 0 && (
                 <span style={{ fontSize: 10, color: 'var(--accent-yellow)' }}>retries: {e.retries}</span>
               )}
+              {e.failureClass && (
+                <span style={{ fontSize: 10, color: 'var(--accent-yellow)' }}>class: {e.failureClass}</span>
+              )}
+              {e.replanNumber !== undefined && (
+                <span style={{ fontSize: 10, color: 'var(--accent-secondary)' }}>
+                  replan {e.replanNumber}/{e.replanBudget ?? '?'}
+                </span>
+              )}
               <span style={{ marginLeft: 'auto', fontSize: 10, color: 'var(--text-muted)', display: 'flex', alignItems: 'center', gap: 4 }}>
                 <FiClock size={10} /> {timeString(e.at)}
               </span>
@@ -213,7 +222,13 @@ export function JournalPage() {
                 : undefined}
             />
             <Field label="failure" value={e.failure} />
-            <Field label="recovery" value={e.recovery} />
+            <Field
+              label="recovery"
+              value={e.recoveryStrategy
+                ? `${e.recoveryStrategy}${e.recoveryAttempt != null ? ` (attempt ${e.recoveryAttempt}/${e.recoveryBudget ?? '?'})` : ''}${e.recovery ? ` — ${e.recovery}` : ''}`
+                : e.recovery}
+            />
+            <Field label="plan change" value={e.planChange} />
             <Field label="detail" value={e.detail} />
             <Field
               label="ids"

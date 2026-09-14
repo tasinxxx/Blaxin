@@ -72,7 +72,7 @@ export type JournalStatus =
 
 export type JournalKind =
   | 'COMMAND' | 'ROUTER' | 'PLAN' | 'ACTION' | 'OBSERVATION'
-  | 'VERIFICATION' | 'RECOVERY' | 'MEMORY' | 'RESULT';
+  | 'VERIFICATION' | 'RECOVERY' | 'REPLAN' | 'MEMORY' | 'RESULT';
 
 export interface JournalEntry {
   id: string;
@@ -90,6 +90,13 @@ export interface JournalEntry {
   observation?: string;
   verification?: { method: string; status: string; detail: string };
   retries?: number;
+  failureClass?: string;
+  recoveryStrategy?: string;
+  recoveryAttempt?: number;
+  recoveryBudget?: number;
+  replanNumber?: number;
+  replanBudget?: number;
+  planChange?: string;
   failure?: string;
   recovery?: string;
   detail?: string;

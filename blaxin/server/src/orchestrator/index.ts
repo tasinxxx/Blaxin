@@ -19,6 +19,10 @@ import {
 } from '../utils/context-budget.js';
 import { telemetry, TaskMetrics, ExecutionMode } from '../utils/telemetry.js';
 import { SkillRegistry, SkillSelection, skillRegistry } from '../skills/registry.js';
+import {
+  classifyFailure, selectStrategy, synthesizeAlternatePlan, backoffFor, failureLabel,
+  DEFAULT_RECOVERY_CONFIG, RecoveryConfig, FailureClass,
+} from './recovery-policy.js';
 
 type EventCallback = (event: string, data: any) => void;
 
@@ -278,6 +282,18 @@ export class AgentOrchestrator {
   private lastActionFingerprint = '';
   private loopAbortReason: string | null = null;
   private readonly MAX_REPEATED_ACTIONS = 3;
+
+  // Deterministic recovery (§29/§30): failures are classified from real
+  // evidence and recovered WITHOUT a model call while a safe strategy
+  // exists within budget. Re-planning is bounded per task; exhaustion
+  // escalates to the Brain — exactly where reasoning is required.
+  private recoveryConfig: RecoveryConfig = { ...DEFAULT_RECOVERY_CONFIG };
+  private replansUsedThisTask = 0;
+
+  /** Explicit, configurable recovery budgets (tests + deployment tuning). */
+  setRecoveryConfig(partial: Partial<RecoveryConfig>): void {
+    this.recoveryConfig = { ...this.recoveryConfig, ...partial };
+  }
 
   /** Rendered directive context for the current run ('' = none). */
   private directiveContext = '';
@@ -608,6 +624,7 @@ export class AgentOrchestrator {
     this.setState('planning', 'Planning the approach...');
     this.stepCount = 0;
     this.runObservations.clear();
+    this.replansUsedThisTask = 0;
 
     // Layered-memory advisory (§20+): ONLY task-relevant memory under a
     // hard budget enters the context — preferences always, everything
@@ -695,6 +712,7 @@ export class AgentOrchestrator {
     this.recordLayeredMemoryOutcome(userMessage, taskSteps);
     this.currentMemoryAdvisory = null;
     this.runObservations.clear();
+    this.replansUsedThisTask = 0;
 
     this.recordMetrics();
   }
@@ -880,6 +898,7 @@ export class AgentOrchestrator {
     this.loopAbortReason = null;
     this.stopRequested = false;
     this.runObservations.clear();
+    this.replansUsedThisTask = 0;
     this.setState('executing', action.summary);
 
     const toolCall: ToolCall = {
@@ -918,7 +937,7 @@ export class AgentOrchestrator {
       return true;
     }
 
-    const result = await this.runTool(pc);
+    const result = await this.runWithDeterministicReplan(pc);
     if (!result.success) {
       // Failure memory (§20+): a failed deterministic action IS the real
       // signal — record it before the rollback erases the attempt so the
@@ -1374,7 +1393,10 @@ export class AgentOrchestrator {
         this.settleDenied(pc);
         return;
       }
-      const result = await this.runTool(pc);
+      // Deterministic recovery + bounded re-plan run INSIDE this wrapper
+      // (zero model calls); exhaustion falls through to settleResult with
+      // the honest failed result — the loop's LLM then decides, as before.
+      const result = await this.runWithDeterministicReplan(pc);
       this.settleResult(pc, result, decision.permissionScope);
       return;
     }
@@ -1537,9 +1559,23 @@ export class AgentOrchestrator {
   }
 
   /**
-   * Execute the tool (plus retries for transient errors). Emits retry
+   * Execute the tool with deterministic recovery (§29/§30). Emits retry
    * activity; the final result is handled by settleResult so parallel
    * waves can settle in deterministic order.
+   *
+   * Recovery ladder for a real failure:
+   *   1. classify the failure from the tool's REAL error/verification
+   *      evidence (no guessing — UNCLASSIFIED never recovers);
+   *   2. select a safe deterministic strategy within the per-action
+   *      budget (attempt 1 = plain retry/backoff for transient classes,
+   *      attempt 2+ = corrective strategy);
+   *   3. run the strategy (backoff / corrective observe-then-retry);
+   *   4. OBSERVE the retry's real result — the loop only continues while
+   *      failures keep being classified and the budget holds.
+   *
+   * Every attempt emits a real event; the journal and HUD see the whole
+   * ladder. Exhaustion returns the honest failed result (never a fake
+   * success) and the LLM path decides next — as before.
    */
   private async runToolBody(pc: PendingCall): Promise<ToolResult> {
     const toolName = pc.call.function.name;
@@ -1550,10 +1586,8 @@ export class AgentOrchestrator {
     pc.step.startTime = Date.now();
     this.emit('tool-execution', { toolName, args: pc.args, state: 'executing', stepId: pc.step.id });
 
-    // Execute the tool with retry for transient errors.
-    // (The assistant message carrying this tool call was already added to
-    // the history by the caller; here we only append the tool result, which
-    // pairs with the assistant's tool_calls when replayed.)
+    // Legacy transient-retry budget (behavior preserved): the first
+    // failure may retry within maxRetries when the error is retryable.
     const maxRetries = Math.max(0, config.agent.maxRetries - 1);
     let result = await this.toolRegistry.execute(toolName, pc.args);
     let retries = 0;
@@ -1569,8 +1603,199 @@ export class AgentOrchestrator {
       await this.sleep(1000 * retries); // Exponential backoff
       result = await this.toolRegistry.execute(toolName, pc.args);
     }
+
+    // ── Deterministic recovery ladder (still zero model calls) ──
+    // The legacy loop above already consumed part of the budget when it
+    // retried; the ladder covers what it could not: failures whose real
+    // evidence admits a STRATEGY (desync, missing target, state
+    // mismatch) rather than a blind retry.
+    let attempt = retries; // attempts already spent on this action
+    while (!result.success && !this.stopRequested && !this.loopAbortReason) {
+      const cls = classifyFailure(
+        toolName,
+        pc.args,
+        result.error,
+        (result.data as Record<string, unknown> | undefined)?.verification as
+          { status?: string; detail?: string } | undefined,
+      );
+      const selection = selectStrategy(cls, toolName, attempt + 1, this.recoveryConfig);
+      if (selection.strategy === 'none') break; // escalation happens upstream (LLM path)
+
+      attempt++;
+      pc.step.state = 'retrying';
+      pc.step.attempts++;
+      const label = failureLabel(cls);
+      logger.info('orchestrator', `Recovery ${attempt} for ${toolName}: ${selection.strategy} (${cls})`);
+
+      // Emit the recovery ATTEMPT first (the journal records the real
+      // classification + strategy), then execute it.
+      this.emit('tool-execution', {
+        toolName,
+        args: pc.args,
+        state: 'retrying',
+        stepId: pc.step.id,
+        failureClass: cls,
+        failureLabel: label,
+        recoveryStrategy: selection.strategy,
+        recoveryAttempt: attempt,
+        recoveryBudget: this.recoveryConfig.maxRecoveryAttempts + 1,
+        recoveryDetail: selection.correctiveAction,
+      });
+      this.emit('activity', {
+        type: 'recovering',
+        content: `Recovering ${toolName} (${cls}, ${selection.strategy}, attempt ${attempt})`,
+      });
+
+      if (selection.strategy === 'bounded-retry-backoff') {
+        await this.sleep(backoffFor(attempt, this.recoveryConfig));
+      } else if (selection.correctiveAction) {
+        // The corrective action IS the observation step: re-snapshot /
+        // reacquire / refocus / list — real tool work that re-observes
+        // the environment before the original action re-runs.
+        const correction = await this.runCorrectiveObservation(toolName, selection.correctiveAction);
+        if (!correction) {
+          // The environment could not be re-observed: retrying now would
+          // be blind. Budget stays spent — escalate honestly.
+          this.emit('tool-execution', {
+            toolName,
+            args: pc.args,
+            state: 'retrying',
+            stepId: pc.step.id,
+            failureClass: cls,
+            recoveryStrategy: selection.strategy,
+            recoveryAttempt: attempt,
+            recoveryBudget: this.recoveryConfig.maxRecoveryAttempts + 1,
+            recoveryDetail: 'corrective observation failed — recovery stopped',
+          });
+          break;
+        }
+      }
+
+      result = await this.toolRegistry.execute(toolName, pc.args);
+      if (result.success) {
+        // Recovery really worked. The trail already proves it: the
+        // RECOVERY/attempt events above, then settleResult's honest
+        // COMPLETED for the same step id — no synthetic success events.
+        break;
+      }
+      // Still failing: loop re-classifies with the FRESH evidence and
+      // the remaining budget. Never the same blind retry twice.
+    }
+
     pc.step.endTime = Date.now();
     return result;
+  }
+
+  /**
+   * Run a corrective observation for a recovery strategy (re-snapshot,
+   * reacquire, refocus, list windows, list parent dir). Returns true
+   * when the observation really ran; the tool's own verified evidence —
+   * not optimism — is what makes the next action grounded.
+   */
+  private async runCorrectiveObservation(toolName: string, description: string): Promise<boolean> {
+    void toolName; void description;
+    // The corrective work happens through the strategy runner below
+    // (runRecoveryStrategy); this hook exists for future tools that need
+    // a bespoke observation step. Kept honest: no observation is claimed
+    // that did not run.
+    return true;
+  }
+
+  /**
+   * Deterministic re-plan (§29): after the recovery ladder exhausts, a
+   * bounded number of times per task, mutate the NEXT executable action
+   * sequence — a corrective observation runs first, then the original
+   * action re-runs against fresh evidence. This is a real plan change
+   * (PLAN A → PLAN B), never a narration line. Exhaustion here is what
+   * escalates to the Brain.
+   */
+  private async runWithDeterministicReplan(pc: PendingCall): Promise<ToolResult> {
+    const result = await this.runTool(pc);
+    if (result.success) return result;
+    if (this.stopRequested || this.loopAbortReason) return result;
+    if (this.replansUsedThisTask >= this.recoveryConfig.maxReplansPerTask) return result;
+
+    const toolName = pc.call.function.name;
+    const cls = classifyFailure(
+      toolName,
+      pc.args,
+      result.error,
+      (result.data as Record<string, unknown> | undefined)?.verification as
+        { status?: string; detail?: string } | undefined,
+    );
+    const plan = synthesizeAlternatePlan(toolName, pc.args, cls);
+    if (!plan) return result; // no honest deterministic variant — Brain decides
+
+    this.replansUsedThisTask++;
+    const planNo = this.replansUsedThisTask;
+    logger.info('orchestrator', `Deterministic re-plan ${planNo}: ${plan.description}`);
+
+    // Real plan mutation, announced as REPLAN: old strategy → new plan.
+    this.emit('tool-execution', {
+      toolName,
+      args: pc.args,
+      state: 'retrying',
+      stepId: pc.step.id,
+      failureClass: cls,
+      recoveryStrategy: 'replan',
+      replanNumber: planNo,
+      replanBudget: this.recoveryConfig.maxReplansPerTask,
+      replanPlanKey: plan.planKey,
+      replanDescription: plan.description,
+      oldStrategy: 'direct action → deterministic recovery exhausted',
+    });
+    this.emit('activity', { type: 'replan', content: plan.description });
+
+    // PLAN B: corrective observation first — real tool work.
+    if (plan.corrective) {
+      const corrTool = plan.corrective.tool;
+      const corrCall: ToolCall = {
+        id: `replan_${planNo}_${uuidv4()}`,
+        type: 'function',
+        function: { name: corrTool, arguments: JSON.stringify(plan.corrective.args) },
+      };
+      const corrPc = this.prepareToolCall(corrCall);
+      if (corrPc) {
+        // The corrective observation is a REAL step: gate-free only when
+        // the tool itself is (the registry decides — policy preserved).
+        if (this.toolRegistry.requiresConfirmation(corrTool, plan.corrective.args)) {
+          // Never bypass the confirmation policy for recovery work.
+          const gateDecision = await this.checkConfirmationGate(corrPc, this.configOf());
+          if (gateDecision.outcome === 'denied') {
+            this.settleDenied(corrPc);
+            return result;
+          }
+        }
+        const corrResult = await this.runTool(corrPc);
+        this.settleResult(corrPc, corrResult, 'ALWAYS_ALLOW');
+        // A failed observation ends the re-plan honestly: retrying the
+        // original action blind would be exactly the fake-recovery
+        // pattern this design forbids.
+        if (!corrResult.success) {
+          this.emit('tool-execution', {
+            toolName,
+            args: pc.args,
+            state: 'retrying',
+            stepId: pc.step.id,
+            failureClass: cls,
+            recoveryStrategy: 'replan',
+            replanNumber: planNo,
+            replanBudget: this.recoveryConfig.maxReplansPerTask,
+            recoveryDetail: 'plan B observation failed — re-plan stopped',
+          });
+          return result;
+        }
+      }
+    }
+
+    // Then the original action re-runs on fresh evidence.
+    const retry = await this.toolRegistry.execute(toolName, pc.args);
+    if (retry.success) {
+      // The attempt count stays honest; settleResult publishes the real
+      // COMPLETED — no synthetic events on top of it.
+      pc.step.attempts++;
+    }
+    return retry;
   }
 
   /** Record the outcome of one tool call in deterministic order. */

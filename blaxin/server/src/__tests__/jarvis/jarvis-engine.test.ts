@@ -297,6 +297,65 @@ describe('Jarvis runtime state reflection (§5)', () => {
     expect(phases).toContain('reporting');
     expect(phases[phases.length - 1]).toBe('idle');
   });
+
+  it('a classified recovery carries the REAL class/strategy/budget in the snapshot', () => {
+    const { engine, emit } = makeEngine();
+    engine.receiveCommand({ message: 'Open the site', source: 'text' });
+    emit('tool-execution', {
+      toolName: 'blaxin_web', state: 'retrying', stepId: 's1',
+      failureClass: 'TARGET_NOT_FOUND',
+      failureLabel: 'TARGET_NOT_FOUND — target missing or vanished',
+      recoveryStrategy: 'alternate-path',
+      recoveryAttempt: 2,
+      recoveryBudget: 3,
+    });
+    const snap = engine.snapshot();
+    expect(snap.phase).toBe('recovering');
+    expect(snap.recovery).toEqual({
+      failureClass: 'TARGET_NOT_FOUND',
+      strategy: 'alternate-path',
+      attempt: 2,
+      budget: 3,
+      replan: undefined,
+    });
+  });
+
+  it('a re-plan carries the REAL old → new plan change in the snapshot', () => {
+    const { engine, emit } = makeEngine();
+    engine.receiveCommand({ message: 'Find the button', source: 'text' });
+    emit('tool-execution', {
+      toolName: 'blaxin_web', state: 'retrying', stepId: 's1',
+      failureClass: 'TARGET_NOT_FOUND',
+      recoveryStrategy: 'replan',
+      replanNumber: 1,
+      replanBudget: 1,
+      replanDescription: 'PLAN B: re-observe the real page state, then re-run click against fresh evidence',
+      oldStrategy: 'direct action → deterministic recovery exhausted',
+    });
+    const rec = engine.snapshot().recovery;
+    expect(rec?.replan).toEqual({
+      number: 1,
+      budget: 1,
+      planChange: 'direct action → deterministic recovery exhausted → PLAN B: re-observe the real page state, then re-run click against fresh evidence',
+    });
+  });
+
+  it('recovery state clears when the run terminates (never stale RECOVERING)', () => {
+    const { engine, emit, snapshots } = makeEngine();
+    engine.receiveCommand({ message: 'Open the site', source: 'text' });
+    emit('tool-execution', {
+      toolName: 'blaxin_web', state: 'retrying', stepId: 's1',
+      failureClass: 'TARGET_NOT_FOUND', recoveryStrategy: 'alternate-path',
+      recoveryAttempt: 1, recoveryBudget: 3,
+    });
+    expect(engine.snapshot().recovery).toBeDefined();
+    runStandardTask(emit, { terminal: 'completed' });
+    expect(engine.snapshot().recovery).toBeUndefined();
+    expect(engine.snapshot().phase).toBe('idle');
+    // No snapshot ever showed RECOVERING after the terminal state.
+    const recovering = snapshots.filter((s) => s.phase === 'recovering');
+    expect(recovering.length).toBeGreaterThanOrEqual(1);
+  });
 });
 
 describe('Jarvis mission-routed reporting', () => {

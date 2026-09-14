@@ -155,6 +155,26 @@ export function useWebSocket() {
                 state: data.state,
                 result: data.result,
               });
+              // Real deterministic recovery / re-plan events carry their
+              // own typed payloads — surfaced as RECOVERY lines with the
+              // classification, strategy and budget position. No line is
+              // emitted without the corresponding runtime evidence.
+              if (data.state === 'retrying' && (data.failureClass || data.replanNumber)) {
+                const cls = String(data.failureClass || '');
+                const strategy = String(data.recoveryStrategy || (data.replanNumber ? 'replan' : ''));
+                const attempt = typeof data.recoveryAttempt === 'number' ? ` attempt ${data.recoveryAttempt}/${data.recoveryBudget ?? '?'}` : '';
+                const replan = data.replanNumber
+                  ? ` REPLAN ${data.replanNumber}/${data.replanBudget ?? '?'}: ${String(data.replanDescription || data.replanPlanKey || '')}`
+                  : '';
+                const detail = String(data.recoveryDetail || '');
+                useAppStore.getState().addActivityLine({
+                  id: nextActivityId(),
+                  time: Date.now(),
+                  kind: 'recovery',
+                  text: `RECOVERY${replan || ` (${cls} → ${strategy}${attempt})`}${detail ? ` — ${detail}` : ''}`.slice(0, 240),
+                });
+                break;
+              }
               useAppStore.getState().addActivityLine({
                 id: nextActivityId(),
                 time: Date.now(),
@@ -265,6 +285,21 @@ export function useWebSocket() {
               // The Jarvis engine's real phase/directive/report snapshot.
               if (data && typeof data.phase === 'string') {
                 useAppStore.getState().setJarvisSnapshot(data);
+                // Real recovery state surfaces with the phase: the line
+                // carries the classification/strategy/budget the runtime
+                // actually reported — nothing is shown without an event.
+                const rec = data.recovery;
+                if (rec && data.phase === 'recovering') {
+                  const replan = rec.replan
+                    ? ` REPLAN ${rec.replan.number}/${rec.replan.budget}${rec.replan.planChange ? `: ${rec.replan.planChange}` : ''}`
+                    : '';
+                  useAppStore.getState().addActivityLine({
+                    id: nextActivityId(),
+                    time: Date.now(),
+                    kind: 'recovery',
+                    text: `JARVIS ${String(data.phase).toUpperCase()} — ${rec.failureClass ?? 'failure'} → ${rec.strategy ?? 'recovery'}${rec.attempt != null ? ` (${rec.attempt}/${rec.budget ?? '?'})` : ''}${replan}`.slice(0, 240),
+                  });
+                }
                 // Real routing/report transitions belong in the feed.
                 if (data.lastReport && data.phase === 'idle') {
                   const r = data.lastReport;

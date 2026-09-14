@@ -34,6 +34,7 @@ const KIND_CLASS: Record<ActivityLine['kind'], string> = {
   user: 'jh-t-user',
   error: 'jh-t-err',
   info: 'jh-t-ok',
+  recovery: 'jh-t-data',
 };
 
 function fmtClock(ts: number): string {

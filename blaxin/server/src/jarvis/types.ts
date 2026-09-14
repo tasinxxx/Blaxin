@@ -158,9 +158,34 @@ export type JarvisPhase =
   | 'blocked'
   | 'reporting';
 
+/**
+ * REAL recovery state of the current run — present only while a
+ * deterministic recovery or re-plan actually ran. Every field comes
+ * from a real tool-execution payload (classification/strategy/budget);
+ * nothing here is decorative.
+ */
+export interface JarvisRecoveryState {
+  /** Failure class derived from real tool evidence (recovery-policy). */
+  failureClass?: string;
+  /** The deterministic strategy that was selected (or 'replan'). */
+  strategy?: string;
+  /** Attempt number within the explicit budget. */
+  attempt?: number;
+  budget?: number;
+  /** Present only when the recovery level is a real RE-PLAN. */
+  replan?: {
+    number: number;
+    budget: number;
+    /** old strategy → new plan (real plan mutation, not narration). */
+    planChange?: string;
+  };
+}
+
 /** Snapshot broadcast on connect so the HUD never shows stale state. */
 export interface JarvisSnapshot {
   phase: JarvisPhase;
   directive: JarvisDirective | null;
   lastReport: AgentReport | null;
+  /** Present only when deterministic recovery/re-plan is really active. */
+  recovery?: JarvisRecoveryState;
 }
