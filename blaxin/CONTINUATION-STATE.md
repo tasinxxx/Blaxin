@@ -1,5 +1,129 @@
 # BLAXIN Engineering Mission — Continuation State
 
+## SESSION — BOUNDED DETERMINISTIC AUTO-RECOVERY / RE-PLANNING (2026-09-14, PART 14)
+
+Continued per the continuation directive (inspect first, no reset, no
+redo of completed audits). The highest-priority missing capability from
+Part 13's honest-gaps list is now IMPLEMENTED end to end: failures are
+classified from real evidence and recovered deterministically — zero
+model calls — while a safe strategy exists within an explicit budget.
+
+### 1. Recovery policy (`orchestrator/recovery-policy.ts`, NEW)
+- **Failure classification from REAL evidence** (`classifyFailure`):
+  matches the ACTUAL error strings the tools emit (verified against the
+  tool-verification/browser-nav/web-agent-honesty suites' pinned
+  messages) + the tool's verification payload, contextualized by tool.
+  Classes: TRANSIENT_TIMEOUT, OBSERVATION_UNAVAILABLE, SESSION_DESYNC,
+  TARGET_NOT_FOUND, STATE_MISMATCH, ENVIRONMENT_BLOCKED, UNCLASSIFIED.
+  Empty/unknown evidence → UNCLASSIFIED (never guessed).
+- **Strategy selection** (`selectStrategy`): transient → bounded retry
+  with capped exponential backoff; observability loss/desync →
+  reobserve-then-retry; target/state problems → alternate-path with a
+  tool-fitting corrective action (re-snapshot+re-ground, real window
+  list+refocus, parent-dir listing). ENVIRONMENT_BLOCKED and
+  UNCLASSIFIED → 'none' (Brain territory — never retried blind).
+- **Budgets**: `maxRecoveryAttempts` (default 2, after the first real
+  attempt), `maxReplansPerTask` (default 1), `baseBackoffMs`/`maxBackoffMs`
+  (300/2000). Explicit, configurable via `orch.setRecoveryConfig()`.
+- **Alternate-plan synthesis** (`synthesizeAlternatePlan`): returns a
+  NEW executable sequence (corrective observation + the original action
+  re-run) or NULL when no honest deterministic variant exists — null is
+  honest, never a narration-only "replan".
+
+### 2. Orchestrator wiring (`orchestrator/index.ts`)
+- **Recovery ladder inside each action** (`runToolBody`): on failure,
+  classify → select strategy within remaining budget → emit a real
+  `tool-execution state=retrying` event carrying `failureClass`,
+  `failureLabel`, `recoveryStrategy`, `recoveryAttempt`,
+  `recoveryBudget`, `recoveryDetail` → run the strategy (backoff or
+  corrective observation) → re-observe the FRESH result → loop only
+  while still failing and budget holds. Legacy transient-retry behavior
+  (maxRetries + `isRetryableError`) is preserved and shares the attempt
+  budget; recovered successes settle through settleResult exactly once
+  (no synthetic success events).
+- **Deterministic re-plan** (`runWithDeterministicReplan`, wrapping
+  both the LLM-path serial waves and the direct fast path): after the
+  ladder exhausts, once per task, PLAN B really runs — a corrective
+  observation (REAL tool execution, gated by the tool's own
+  requiresConfirmation policy) then the original action on fresh
+  evidence. Corrective-observation failure stops the re-plan honestly
+  (no blind retry). Announced with `replanNumber`/`replanBudget`/
+  `replanDescription`/`oldStrategy` on the tool-execution channel.
+- **Brain escalation is exactly post-exhaustion**: the honest failed
+  result flows to settleResult → the LLM loop decides next, as before.
+  No path bypasses confirmation, policy or journaling.
+
+### 3. Journal evidence (`utils/mission-journal.ts`)
+- NEW kind **REPLAN** + fields `failureClass`, `recoveryStrategy`,
+  `recoveryAttempt`, `recoveryBudget`, `replanNumber`, `replanBudget`,
+  `planChange` (old → new).
+- RECOVERY lines now record the real classification/strategy/attempt/
+  budget (status RECOVERING — the settled ACTION line carries the
+  outcome); REPLAN lines record the real plan change. The generic
+  retry line stays for the legacy transient path. Journal trace for a
+  recovered mission: ACTION → RECOVERY×n → REPLAN → OBSERVATION →
+  VERIFICATION, one ACTION line per real action (in-place update).
+
+### 4. JARVIS state + HUD
+- `JarvisSnapshot.recovery` (server + types): present only while
+  recovery/re-plan is really active — failureClass, strategy, attempt,
+  budget, and replan{number,budget,planChange}. Set ONLY from real
+  tool-execution payloads; cleared on terminal agent-state and at
+  report composition (never stale RECOVERING).
+- Client: new `recovery` activity kind; RECOVERY lines show
+  class → strategy (attempt/budget) or REPLAN n/b with the plan
+  change; journal page gains a REPLAN filter/badge, class badge and a
+  plan-change field. No decorative animations — every line maps to a
+  runtime event.
+
+### Tests (+60: 639 → 699)
+- `__tests__/orchestrator/recovery-policy.test.ts` (NEW, 32): real
+  error strings classify correctly; UNCLASSIFIED/ENVIRONMENT_BLOCKED
+  never recover; budget is hard; corrective actions are real tool
+  work; backoff bounds; plan synthesis incl. honest nulls.
+- `__tests__/orchestrator/deterministic-recovery.test.ts` (NEW, 11):
+  orchestrator-level ladder (alternate-path recovery with zero EXTRA
+  model calls), hard budget + Brain escalation only after exhaustion,
+  reobserve-then-retry, transient backoff, UNCLASSIFIED straight
+  through, honest single COMPLETED settle, STOP interrupts the ladder,
+  re-plan runs PLAN B (corrective + re-run), per-task budget reset,
+  corrective-failure stops honestly, direct path also re-plans with
+  ZERO model calls.
+- `__tests__/mission-journal-recovery.test.ts` (NEW, 4): classified
+  RECOVERY evidence, REPLAN plan-change lines, legacy retry line
+  preserved, full honest arc (failure → RECOVERY×2 → REPLAN →
+  verified success).
+- `jarvis-engine.test.ts` (+3, 28→31): recovery snapshot carries the
+  real class/strategy/budget; re-plan snapshot carries old → new;
+  recovery state clears on termination.
+- Test-infra: `FakeToolRegistry` accepts any Tool-shaped fake.
+
+### Verification this phase (evidence, no claims)
+- Server `tsc --noEmit` clean; FULL suite **699 passed / 12 skipped /
+  0 failed** (skips = env-gated real-Chrome/live-desktop/live-LLM).
+  One run hit the DOCUMENTED load flake (`distributed/brain-integration`
+  reconnect timing, real sockets) — passes 7/7 in isolation in 2.8s and
+  the next full run is green; not a regression (does not touch the
+  orchestrator tool path).
+- Client `tsc -b` + `vite build` clean (4.9s).
+- E2E (real backend + vite + real Chrome): **8/8 PASS** (23.6s).
+- Commit: **d47b5d4** — pushed to main. v1.4.0 remains UNTAGGED.
+
+### NEXT IMPLEMENTATION TARGET
+1. **Specialist bounded-objective ownership (§6, secondary target from
+   the directive)**: give a delegated specialist (browser/files/terminal
+   role from the real tool activation) a bounded OBJECTIVE with
+   constraints, timeout, action budget and a verification requirement;
+   the specialist runs its own observe → verify loop (the recovery
+   ladder from this session is reusable inside it) and returns a
+   structured SUCCESS/FAILED/BLOCKED/UNVERIFIED with evidence; the
+   central orchestrator then decides CONTINUE/RETRY/RECOVER/REASSIGN/
+   REPLAN/ESCALATE. Safety boundary unchanged: JARVIS → policy →
+   specialist → tool, no bypass of confirmation/policy/journal.
+2. v1.4.0 tag remains deferred until the agreed scope is verified.
+
+---
+
 ## SESSION — MISSION JOURNAL + LIVE DESKTOP VERIFICATION + PACKAGING (2026-09-13, PART 13)
 
 Continued implementation (not a test-only pass). Two capabilities were
