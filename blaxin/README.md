@@ -31,6 +31,21 @@ Supporting subsystems (all real, inspectable state — no simulated UI data):
   checkpoints, pause/resume-from-checkpoint, retry-failed-only; a single
   scheduler feeds queued tasks + mission steps to the orchestrator and
   settles them from real agent-state events.
+- **Mission Coordination**: real specialist evidence binds to mission
+  steps (serial attribution via the running queue task — never guessed),
+  mission-level verification aggregates from the per-step evidence
+  (VERIFIED only when every completed step verified; UNVERIFIED never
+  upgrades and caps the Jarvis report at PARTIAL), `{{evidence:stepId}}`
+  templates resolve only from real VERIFIED evidence, later steps receive
+  earlier verified evidence as bounded background context, and cancelling
+  a mission cancels its queued/running tasks (no orphan specialists).
+- **Specialist Ownership**: the first real tool activation claims the
+  task's objective as a bounded specialist objective (BROWSER/FILES/
+  TERMINAL/… from the actual tool) with explicit action/recovery/replan
+  budgets and a wall-clock deadline; results are terminal, emitted exactly
+  once, and honest (invocation ≠ verified outcome). Budgets are
+  user-configurable via `agent.specialist` / `agent.recovery` in the
+  persisted config.
 - **Agency Registry**: every actual tool execution becomes an observable
   worker (real runtime step ids, real lifecycle events) — the HUD agency
   panel can only show what really ran.
@@ -66,7 +81,8 @@ discovery, a curated model catalog, deterministic fit recommendation
 and Ollama lifecycle management) and an **Oracle Cloud provisioning
 engine** (signed OCI REST access, discovery, resumable provisioning,
 reverse-tunnel inference). See [docs/models.md](docs/models.md) and
-[docs/oci.md](docs/oci.md).
+[docs/oci.md](docs/oci.md). The specialist/mission delegation model is
+documented in [docs/specialists.md](docs/specialists.md).
 
 ## Distributed Brain (external intelligence)
 
@@ -93,12 +109,13 @@ The standalone Brain runs the real LLM path: configure its provider and model wi
 - **Local Models (v1.2.0)**: real hardware discovery (CPU/RAM/GPU/VRAM/disk/arch), a maintainable model catalog, and deterministic recommendation with honest warnings — BLAXIN never invents benchmarks or shows an unearned READY
 - **Oracle Cloud Models (v1.2.0)**: connect an OCI account (RSA-SHA256 signed API, credentials encrypted at rest), discover real shapes/quotas/instances, and provision a resumable, cancellable inference node whose model endpoint reaches the Brain over a loopback SSH tunnel — never a public port
 - **Agent Task Engine**: state machine, step tracking, retry/backoff, provider fallback, loop detection, confirmation gate for high-impact tool actions, and a persistent task queue with priorities, dependency gating and pause/resume/cancel (survives restarts)
-- **Missions (v1.4.0)**: multi-step persistent missions with per-step checkpoints — pause and resume from the last completed checkpoint, retry only failed steps, real progress 0-1
-- **Jarvis HUD (v1.4.0)**: the approved `design/blaxin_os.html` command-center interface, fully functional: boot overlay gated on the real backend connection, neural status, memory bank, live task queue with actions, 5-tab agent terminal (real event stream + slash-command composer), network hub (real RX/TX telemetry), security vault (real persisted security log), agency panel (real tool-execution workers), layered-memory panel, activity ticker, mission checkpoint reporting. The JARVIS panel's phase reflects the REAL runtime (understanding → routing → planning → thinking → executing → observing / waiting / blocked / recovering → reporting), driven only by actual engine events. Commands: `/help /status /clear /stop /memory /queue /missions /mission-new /version`
+- **Missions (v1.4.0)**: multi-step persistent missions with per-step checkpoints — pause and resume from the last completed checkpoint, retry only failed steps, real progress 0-1; mission coordination binds real specialist evidence to steps, aggregates honest mission-level verification (shown in the MISSIONS HUD panel), and propagates cancellation
+- **Specialist Ownership (v1.4.0)**: bounded per-task specialist objectives with action/recovery/replan budgets + deadline, exactly-once honest results, and verification only from real evidence — budgets configurable in `agent.specialist` / `agent.recovery`
+- **Jarvis HUD (v1.4.0)**: the approved `design/blaxin_os.html` command-center interface, fully functional: boot overlay gated on the real backend connection, neural status, memory bank, live task queue with actions, 5-tab agent terminal (real event stream + slash-command composer), network hub (real RX/TX telemetry), security vault (real persisted security log), agency panel (real tool-execution workers), layered-memory panel, missions panel, activity ticker, mission checkpoint reporting. The JARVIS panel's phase reflects the REAL runtime (understanding → routing → planning → thinking → executing → observing / waiting / blocked / recovering → reporting), driven only by actual engine events. Commands: `/help /status /clear /stop /memory /queue /missions /mission-new /version`
 - **Task Memory**: persistent, searchable, deletable memory that never stores secrets
 - **Layered Memory (v1.4.0)**: failure/environment/episodic/procedure stores, relevance-gated advisor read-back, task-end episode + failure recording, `GET /api/memory/layers` inspection
 - **Desktop Control**: Mouse, keyboard, window management via xdotool/ydotool
-- **File System**: Read, write, create, delete files and directories (protected against system/credential paths)
+- **File System**: Read, write, create, delete files and directories (protected against system/credential paths); writes are verified by read-back compare — a write that does not hold is an honest failure
 - **Terminal**: Execute shell commands with timeout protection and dangerous-command confirmation
 - **Browser**: Open URLs, search the web
 - **Screenshots**: Capture screen state for visual observation
@@ -310,3 +327,4 @@ AppImage, `.deb`, favicon) and in-app brand marks are generated from it via
 - [docs/oci.md](docs/oci.md) — Oracle Cloud: security model, discovery, provisioning state machine, secure tunneled endpoints
 - [docs/distributed-brain.md](docs/distributed-brain.md) — distributed Brain/Body architecture, pairing, protocol, Multi-Body, task cancellation and recovery
 - [docs/branding.md](docs/branding.md) — official logo asset, icon generation, packaging usage
+- [docs/specialists.md](docs/specialists.md) — specialist ownership, bounded objectives, budget configuration, mission coordination
