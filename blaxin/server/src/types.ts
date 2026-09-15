@@ -46,6 +46,16 @@ export type ModelCapability =
   | 'multimodal';
 
 // AI Request/Response Types
+/**
+ * An image attached to a message — e.g. a verified screenshot carried on
+ * a tool result so a vision-capable model can SEE what the tool saw.
+ * Always base64 + an explicit mime type; bounded by context-budget.
+ */
+export interface MessageImage {
+  mimeType: string;
+  base64: string;
+}
+
 export interface ChatMessage {
   id: string;
   role: 'system' | 'user' | 'assistant' | 'tool';
@@ -53,6 +63,13 @@ export interface ChatMessage {
   timestamp: number;
   toolCallId?: string;
   name?: string;
+  /**
+   * Images carried on TOOL results (verified screenshots). Ephemeral:
+   * replayed to the model for the current session, never persisted to
+   * the session file (session-state strips them) — the state file and
+   * replay window stay bounded.
+   */
+  images?: MessageImage[];
   /**
    * Tool calls produced by the assistant for this message.
    * Replayed to the provider so that tool results can be matched to

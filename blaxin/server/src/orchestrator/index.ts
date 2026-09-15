@@ -15,7 +15,7 @@ import { memoryAdvisor, MemoryAdvisory, MemorySelection } from '../memory/adviso
 import { memoryLayers, EnvironmentInput, FailureInput, EpisodeInput, ProcedureInput } from '../memory/layers.js';
 import { classifyDirect, DirectAction } from '../router/direct.js';
 import {
-  budgetToolResultOutput, budgetAssistantMessage,
+  budgetToolResultOutput, budgetAssistantMessage, budgetToolResultImages,
 } from '../utils/context-budget.js';
 import { telemetry, TaskMetrics, ExecutionMode } from '../utils/telemetry.js';
 import { SkillRegistry, SkillSelection, skillRegistry } from '../skills/registry.js';
@@ -2120,6 +2120,11 @@ export class AgentOrchestrator {
       ? `Tool result (${toolName}): ${budgetToolResultOutput(result.output)}`
       : `Tool error (${toolName}): ${budgetToolResultOutput(result.error || 'Unknown error')}`;
 
+    // Vision: a verified screenshot is carried ON the tool result so a
+    // vision-capable model can SEE the screen it is reasoning about —
+    // the perception→action loop. Bounded (one image, hard size cap).
+    const images = budgetToolResultImages(result.data);
+
     const resultMsg: ChatMessage = {
       id: uuidv4(),
       role: 'tool',
@@ -2127,6 +2132,7 @@ export class AgentOrchestrator {
       timestamp: Date.now(),
       toolCallId: call.id,
       name: toolName,
+      ...(images.length > 0 ? { images } : {}),
     };
     this.conversationHistory.push(resultMsg);
     this.session.addMessage(resultMsg);

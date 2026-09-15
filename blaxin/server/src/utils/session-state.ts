@@ -1,6 +1,7 @@
 import { readFileSync, writeFileSync, existsSync, mkdirSync, statSync } from 'fs';
 import { logger } from './logger.js';
 import { dataPath } from './paths.js';
+import { stripImages } from './context-budget.js';
 
 // ── Session State Types ─────────────────────────────────────────
 
@@ -102,7 +103,14 @@ class SessionStateManager {
 
       this.state.lastActivity = Date.now();
 
-      const raw = JSON.stringify(this.state, null, 2);
+      // Images are an in-memory replay concern only: never persist base64
+      // payloads to the state file (keeps it text-only and bounded).
+      const persistable = {
+        ...this.state,
+        conversationHistory: stripImages(this.state.conversationHistory),
+      };
+
+      const raw = JSON.stringify(persistable, null, 2);
       writeFileSync(STATE_FILE, raw, { mode: 0o600 });
       this.isDirty = false;
     } catch (error: any) {

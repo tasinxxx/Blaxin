@@ -1,17 +1,103 @@
 # BLAXIN Engineering Mission — Continuation State
 
-MISSION PHASE: A — LOCKED COMPLETE · PHASE B — READY TO START (Stonic parity → 10× → final release)
-CURRENT OBJECTIVE: PHASE B — Stonic capability audit (parity floor), then 10×
-CURRENT SUBTASK: begin the Stonic capability audit (§7–§9 of the master directive)
-CURRENT STATUS: Phase A audit complete — every auditable item VERIFIED with fresh evidence; the only BLOCKED items are environment-gated (no provider key, no verifiable audio sink, no live X keystroke receiver test)
+MISSION PHASE: A — LOCKED COMPLETE · PHASE B — IN PROGRESS (Stonic parity → 10× → final release)
+CURRENT OBJECTIVE: PHASE B — 10× BLAXIN (parity floor established; see docs/capability-matrix.md)
+CURRENT SUBTASK: 10× items — human-like screen understanding (now UNBLOCKED, see Part B1), volume tool (small parity leftover), bulk file verbs, battery telemetry
+CURRENT STATUS: Phase B audit COMPLETE — capability matrix written from Stonic's own public pages + BLAXIN source with pinned evidence; the ONE confirmed parity gap (vision: screenshots never reached the model) is now IMPLEMENTED, TESTED (801 passed) and LIVE-VERIFIED (real X pixels → model-facing image payload)
 COMPLETED: Parts 15–19 (specialist ownership, recovery/re-plan, mission journal, live desktop + real-Chrome verification, tool verification-in-depth, JARVIS state reflection, mission coordination, budget config surface, branding, documentation)
 VERIFIED (fresh this audit): server tsc clean · FULL suite 779 passed / 12 skipped / 0 failed · client tsc -b + vite build clean · E2E 8/8 (18.2s) · real-Chrome probe 14/14 PASS · live X desktop 5/5 · real-Chrome CDP 6/6 · bundle-sync guard idempotent, bundled dist carries Parts 16–17 (md5-identical to server/dist) · version 1.4.0 consistent across VERSION/tauri/server/client/APP_VERSION · docs current (README + docs/specialists.md + docs/branding.md) · git tree clean, all work pushed to origin/main
 BLOCKED (environment, not code): live-LLM round trips (no provider key configured on this machine — deterministic model-path tests + probe cover the paths); voice PHYSICAL audio output (browser TTS/STT code is real and feature-detected, but no verifiable audio sink exists in this environment); live keystroke-receiver verification (host has a focused window; injection is honestly reported as "events sent; receiver not verified")
 KNOWN FAILURES: none open
 KNOWN LIMITATIONS: mission verification is derived in MissionStore (single source of truth); missions completed before coordination existed read UNVERIFIED; the on-disk .deb predates the Part 18 icons (CI regenerates assets on release; a local rebuild is required before any manual artifact check)
-NEXT EXACT ACTION (PHASE B): execute the Stonic capability audit per §8: enumerate publicly observable/relevant Stonic capabilities for this product category (§9 floor list: NL commands, voice, screen awareness, CV, mouse, keyboard, app control, files, browser automation, multi-step tasks, autonomy, memory, agents, system control/monitoring, contextual interaction, real-time task visibility, cinematic interface, local-first), map each to the real BLAXIN implementation, verify by test/runtime evidence, and classify MATCHED / SUPERIOR / PARTIAL / MISSING / UNVERIFIED in a capability matrix (docs/capability-matrix.md). No cloning — independent implementation only. Parity gaps then become the Phase B implementation queue.
+NEXT EXACT ACTION (PHASE B, 10×): the screen-understanding loop is now OPEN (model can SEE verified screenshots on every screenshot tool call, all four provider families mapped). Next 10× targets in priority order: (1) closed-loop computer-use probe — screenshot → model grounds a coordinate → computer-control click → position read-back verifies (needs a provider key OR a deterministic scripted-vision harness); (2) system_audio tool with verified get→set→get read-back (last small parity leftover); (3) bulk file verbs (organize-by-type, dedupe, rename-by-pattern). Stonic rows that are MISSING by documented non-goal (WhatsApp) or UNVERIFIED by environment (voice physical, live-LLM) stay tracked in docs/capability-matrix.md §4.
 RELEASE BLOCKERS: v1.4.0 tag remains deferred — it follows the Phase B scope decision (parity-complete release)
 FINAL RELEASE STATUS: NOT STARTED (Phase B)
+
+---
+
+## SESSION — PHASE B STONIC AUDIT + VISION PARITY GAP IMPLEMENTED (2026-09-15, PART B1)
+
+Executed §8 exactly: state recovered first (clean tree at a279e5f, Phase A locked),
+then the Stonic capability audit, then the ONE real parity gap it exposed was
+implemented → tested → live-verified → documented. No guessing, no UI-as-proof,
+no source-existence-as-proof.
+
+### 1. The audit (docs/capability-matrix.md — NEW)
+- Stonic evidence taken ONLY from Stonic's own public pages (stonicai.com
+  homepage, /features/desktop-automation, /features/voice-control,
+  /features/multi-agent, /features/offline-private, /vs-ChatGPT, /vs-OpenClaw,
+  /changelog) — all fetched fresh this session.
+- Every BLAXIN row cites real source locations + pinned tests + live evidence
+  where it exists. 26 confirmed capabilities classified:
+  **SUPERIOR ×8** (permission scopes, transparent journal, memory layers,
+  specialists, recovery, local execution, browser, E2E honesty),
+  **MATCHED ×11**, **PARTIAL ×4** (screen awareness, desktop vision loop,
+  file bulk verbs, system optimization), **MISSING ×2** (volume, WhatsApp
+  — the latter recorded as a documented non-goal), **UNVERIFIED ×1** (voice
+  physical, environment-blocked as before).
+- §2 separates UNCERTAIN Stonic claims (closed-source, no public proof of
+  screen-understanding depth, verification, or computer-use loops) — these
+  are NOT parity floors. No cloning anywhere.
+
+### 2. The parity gap the audit exposed — the headline finding
+Stonic's flagship claim is "AI reads your screen in real-time and acts on it".
+BLAXIN's screenshot tool verified REAL pixels (verification-in-depth, 5 pinned
+tests) — but `settleResult()` reduced every tool result to TEXT. `data.base64`
+was dropped on the floor: no message carried it, and all four provider mappers
+only emit text. The perception→action loop was broken end-to-end. The screen
+was captured, proven real, and then thrown away before any model could see it.
+
+### 3. The implementation (independent, no cloning)
+- `types.ts`: `MessageImage { mimeType, base64 }` + optional `ChatMessage.images`.
+- `context-budget.ts`: `budgetToolResultImages(data)` — ONE image per tool
+  result (`MAX_IMAGES_PER_TOOL_RESULT=1`), hard cap 4 MB base64
+  (`MAX_IMAGE_BASE64_CHARS`); malformed/oversized images are DROPPED (never
+  truncated into corrupt bytes). `stripImages()` for persistence.
+- `orchestrator/index.ts settleResult`: carries the bounded image onto the
+  tool-result ChatMessage — BOTH routes (LLM path AND deterministic fast path
+  funnel through settleResult, so "take a screenshot" carries pixels too).
+- `providers/messages.ts` — all four wire formats:
+  · OpenAI-compatible: tool message stays text-only; image rides as a user
+    content-parts turn (`image_url` data URL) — the API-required carrier.
+  · Anthropic: `image` source blocks (base64) next to the `tool_result`.
+  · Gemini: `inlineData` part next to the `functionResponse`.
+  · Ollama: native `images` base64 string array on the tool message.
+- `session-state.ts saveState`: strips images before persisting — the state
+  file stays text-only and bounded; images are an in-session replay concern.
+
+### 4. Verification this phase (evidence, no claims)
+- NEW `__tests__/vision-images.test.ts` (18): all four mappers carry images
+  correctly (and stay unchanged for text-only results); multi-image mapping;
+  budget drop-at-cap semantics (oversized → dropped, at-cap → kept);
+  `stripImages` identity when nothing carries images; persistence writes NO
+  base64 while keeping text; text budgeting untouched.
+- NEW `__tests__/vision-orchestrator.test.ts` (4): END-TO-END with a scripted
+  provider — the SECOND model call's message list literally contains the
+  screenshot image on the tool result; no image when the tool carries none
+  (never fabricated); oversized image dropped; failed screenshot never carries
+  an image.
+- NEW `__tests__/tools/vision-live.test.ts` (env-gated BLAXIN_LIVE_DESKTOP=1):
+  **RAN LIVE on the real X display** — real screenshot → verified PNG →
+  budget keeps the REAL base64 intact → OpenAI image_url part and Anthropic
+  image block built from REAL pixels (PNG magic asserted, payload >1KB).
+  The model-facing contract is proven against genuine captured pixels.
+- Server `tsc --noEmit` clean; FULL suite **801 passed / 12 skipped / 0
+  failed** (779 → 801; skips = env-gated live runs). Client `tsc -b` +
+  `vite build` clean. E2E **8/8 PASS** (17.7s).
+- Real-Chrome specialist probe re-run after ALL changes: **14/14 PASS**
+  (COMPLETED_VERIFIED from observed title; journal trail intact).
+- bundle-sync-guard: synced then idempotent; bundled dist carries the vision
+  symbols (`budgetToolResultImages`, `image_url`, `inlineData` probed).
+
+### 5. Honest remaining gaps (tracked, not hidden)
+- Volume control with verified read-back — the last small MISSING parity item.
+- Vision LIVE-LLM round trip (a real multimodal model actually describing the
+  screenshot) — needs a provider key; the payload contract is fully proven
+  without one (payload + pixels verified live).
+- Desktop coordinate grounding from pixels (computer-use loop) — now
+  UNBLOCKED by this change; queued as 10× target #1.
+- Voice physical round trip — environment-blocked (unchanged).
+- WhatsApp — documented non-goal (closed-platform automation).
 
 ---
 

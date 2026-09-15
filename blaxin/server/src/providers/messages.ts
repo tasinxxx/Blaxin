@@ -27,11 +27,45 @@
 
 import { ChatMessage, ToolCall } from '../types.js';
 
+/**
+ * Vision mapping note (per family):
+ *
+ *   OpenAI-compatible: a `tool` message must be plain text, so a tool
+ *     result carrying images becomes a `user` message with content parts
+ *     (text + image_url data URLs) — the format the Chat Completions API
+ *     expects for images following a tool call.
+ *   Anthropic: tool_result blocks accept content arrays; images ride as
+ *     `image` source blocks alongside the text.
+ *   Gemini: functionResponse parts cannot carry binary data; the image
+ *     rides as a sibling `inlineData` part in the same user turn.
+ *   Ollama: messages accept a native `images` string array (base64).
+ */
+
 /** OpenAI-compatible wire messages. */
 export function toOpenAICompatibleMessages(messages: ChatMessage[]): any[] {
   const out: any[] = [];
   for (const m of messages) {
     if (m.role === 'tool') {
+      if (m.images && m.images.length > 0) {
+        // Tool messages must be text-only, so images travel as a user
+        // turn with content parts (the API-recognized image carrier).
+        out.push({
+          role: 'tool',
+          tool_call_id: m.toolCallId || `call_${m.id}`,
+          content: m.content || '',
+        });
+        out.push({
+          role: 'user',
+          content: [
+            { type: 'text', text: `[image attached from ${m.name || 'tool'} result]` },
+            ...m.images.map((img) => ({
+              type: 'image_url',
+              image_url: { url: `data:${img.mimeType};base64,${img.base64}` },
+            })),
+          ],
+        });
+        continue;
+      }
       out.push({
         role: 'tool',
         tool_call_id: m.toolCallId || `call_${m.id}`,
@@ -69,17 +103,13 @@ export function toAnthropicMessages(messages: ChatMessage[]): {
   const system = systemMsgs.map((m) => m.content).join('\n\n') || undefined;
 
   const out: AnthropicMessage[] = [];
-  let pendingToolResults: Array<{ tool_use_id: string; content: string }> = [];
+  let pendingToolResults: Array<Record<string, unknown>> = [];
 
   const flushToolResults = () => {
     if (pendingToolResults.length === 0) return;
     out.push({
       role: 'user',
-      content: pendingToolResults.map((r) => ({
-        type: 'tool_result',
-        tool_use_id: r.tool_use_id,
-        content: r.content,
-      })),
+      content: pendingToolResults,
     });
     pendingToolResults = [];
   };
@@ -88,10 +118,16 @@ export function toAnthropicMessages(messages: ChatMessage[]): {
     if (m.role === 'system') continue;
 
     if (m.role === 'tool') {
-      pendingToolResults.push({
-        tool_use_id: m.toolCallId || `call_${m.id}`,
-        content: m.content || '',
-      });
+      const resultContent: Array<Record<string, unknown>> = [
+        { type: 'tool_result', tool_use_id: m.toolCallId || `call_${m.id}`, content: m.content || '' },
+      ];
+      for (const img of m.images || []) {
+        resultContent.push({
+          type: 'image',
+          source: { type: 'base64', media_type: img.mimeType, data: img.base64 },
+        });
+      }
+      pendingToolResults.push(...resultContent);
       continue;
     }
 
@@ -156,6 +192,11 @@ export function toGeminiMessages(messages: ChatMessage[]): {
           response: { result: m.content || '' },
         },
       });
+      for (const img of m.images || []) {
+        pendingUserParts.push({
+          inlineData: { mimeType: img.mimeType, data: img.base64 },
+        });
+      }
       continue;
     }
 
@@ -196,11 +237,15 @@ export function toOllamaMessages(messages: ChatMessage[]): any[] {
   const out: any[] = [];
   for (const m of messages) {
     if (m.role === 'tool') {
-      out.push({
+      const entry: any = {
         role: 'tool',
         tool_call_id: m.toolCallId || `call_${m.id}`,
         content: m.content || '',
-      });
+      };
+      if (m.images && m.images.length > 0) {
+        entry.images = m.images.map((img) => img.base64);
+      }
+      out.push(entry);
       continue;
     }
     const base: any = { role: m.role, content: m.content };

@@ -7,10 +7,58 @@
 // the tail (both are usually what matters) and marks the cut clearly.
 // =============================================================
 
+import { MessageImage } from '../types.js';
+
 export const TOOL_RESULT_HISTORY_CAP = 12000; // chars per stored tool result
 export const ASSISTANT_MESSAGE_CAP = 16000;   // chars per stored assistant message
 export const MAX_HISTORY_MESSAGES = 30;       // messages replayed to the model
 export const MAX_PERSISTED_MESSAGES = 100;    // messages kept in the session file
+
+// Image budget for vision-carrying tool results (verified screenshots).
+// A full-HD PNG screenshot is ~1–8 MB raw → ~1.4–11 MB base64; models
+// accept up to ~20 MB of image payload per request, but BLAXIN bounds
+// it far below that: ONE image per tool result, at most 4 MB base64.
+export const MAX_IMAGES_PER_TOOL_RESULT = 1;   // images carried per tool result
+export const MAX_IMAGE_BASE64_CHARS = 4_000_000; // ~4 MB base64 ≈ 3 MB PNG
+
+/**
+ * Extract a bounded image payload from a tool result's data field, for
+ * verified screenshot tools. Returns at most MAX_IMAGES_PER_TOOL_RESULT
+ * images, each hard-capped at MAX_IMAGE_BASE64_CHARS — an oversized or
+ * malformed image is DROPPED (honest no-image beats a truncated corrupt
+ * image). The text output still flows as before.
+ */
+export function budgetToolResultImages(data: unknown): MessageImage[] {
+  const out: MessageImage[] = [];
+  if (!data || typeof data !== 'object') return out;
+  const record = data as Record<string, unknown>;
+  const base64 = record.base64;
+  if (typeof base64 !== 'string' || base64.length === 0) return out;
+  const mimeType = typeof record.mimeType === 'string' ? record.mimeType : '';
+  if (!mimeType.startsWith('image/')) return out;
+  if (base64.length > MAX_IMAGE_BASE64_CHARS) return out;
+  out.push({ mimeType, base64 });
+  return out;
+}
+
+/**
+ * Strip images from messages before persistence: the session file stays
+ * text-only and bounded. Images are an in-memory replay concern only.
+ */
+export function stripImages<T>(messages: T[]): T[] {
+  if (messages.length === 0) return messages;
+  const hasImages = messages.some(
+    (m) => typeof m === 'object' && m !== null && (m as Record<string, unknown>).images !== undefined
+  );
+  if (!hasImages) return messages;
+  return messages.map((m) => {
+    const record = m as Record<string, unknown>;
+    if (record.images === undefined) return m;
+    const rest = { ...record };
+    delete rest.images;
+    return rest as T;
+  });
+}
 
 /**
  * Bound `text` to at most `maxChars`, keeping the head and the tail so
