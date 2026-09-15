@@ -1,5 +1,115 @@
 # BLAXIN Engineering Mission — Continuation State
 
+MISSION PHASE: A — finish the current running update (Phase B = Stonic parity → 10× → release, GATED behind Phase A lock)
+CURRENT OBJECTIVE: Mission coordination (§ multi-specialist) — verified end to end
+CURRENT SUBTASK: Part 16 verification complete; commit + push next
+CURRENT STATUS: All gates green (tests, typecheck, build, E2E, live real-Chrome proof)
+COMPLETED: MissionCoordinator implementation + honest verification aggregation + template expansion + shared context + cancellation propagation; filesystem write read-back verification; live VERIFIED browser-specialist proof (probe 14/14); dedicated deterministic suites for both (35 tests)
+VERIFIED: server tsc clean; FULL suite 772 passed / 12 skipped / 0 failed (one documented brain-integration load flake in an earlier run passes 7/7 in isolation — the final run is fully green); client tsc -b + vite build clean; E2E 8/8 (19.0s); real-Chrome probe 14/14 PASS (COMPLETED_VERIFIED from real observed title via url-match)
+IN PROGRESS: nothing else in flight — commit next
+BLOCKED: voice physical output + live-LLM round trips remain environment-blocked (no provider key / no verifiable audio sink) — unchanged
+KNOWN FAILURES: none open
+KNOWN LIMITATIONS: mission verification derives from MissionStore (single source of truth) — the coordinator's live evidence map feeds settleStep and provides context/template detail, NOT a second aggregation; missions completed before coordination existed read UNVERIFIED (honest — absence of evidence is never upgraded)
+FILES CHANGED (Part 16): NEW server/src/orchestrator/mission-coordinator.ts · NEW server/src/__tests__/orchestrator/mission-coordinator.test.ts (27) · NEW server/src/__tests__/tools/filesystem-write.test.ts (8) · NEW client/src/components/hud/MissionPanel.tsx · NEW server/scripts/probe-browser-specialist.mjs · NEW server/src/__tests__/orchestrator/browser-specialist.test.ts (14) · MODIFIED server/src/{index.ts,jarvis/engine.ts,jarvis/types.ts,orchestrator/index.ts,tools/filesystem.ts,utils/missions.ts,utils/scheduler.ts,utils/task-queue.ts} · MODIFIED client/src/{components/hud/HudView.tsx,theme/jarvis.css,utils/store.ts}
+TESTS: mission-coordinator 27/27 · filesystem-write 8/8 · browser-specialist 14/14 · FULL 772/12/0 · E2E 8/8 · probe 14/14
+RUNTIME VERIFICATION: real server + real WS + real Chrome (loopback target): policy approval → CDP navigation → real url-match verification (observed title) → COMPLETED_VERIFIED → journal DELEGATED→ACTION→OBSERVATION→VERIFICATION→RESULT — probe exit 0
+COMMITS: a276451 (Part 15) + this session's commit (next)
+CURRENT VERSION: 1.4.0 (UNTAGGED — tag still deferred)
+NEXT EXACT ACTION: (1) commit Part 16 as two coherent commits (mission coordination; filesystem write verification + tests) and push; (2) NEXT IMPLEMENTATION TARGET: wire specialist budgets into the config surface (defaults are code constants; setSpecialistConfig exists for tests/ops); (3) then Phase A completion audit against the §-checklist before any v1.4.0 tag
+RELEASE BLOCKERS: v1.4.0 tag deferred until the agreed scope (config surface + final §-audit) is verified
+FINAL RELEASE STATUS: NOT STARTED (Phase B)
+
+---
+
+## SESSION — MISSION COORDINATION VERIFIED END TO END (2026-09-15, PART 16)
+
+Resumed per the continuation directive: reconstructed state FIRST (git
+status/log, CONTINUATION-STATE, full git diff, all new/changed files).
+The uncommitted WIP was Part 16's mission-coordination system — exactly
+Part 15's NEXT IMPLEMENTATION TARGET #2. NO redesign, NO restart: the
+architecture was sound; the work was VERIFICATION + the gaps it exposed.
+
+### What the WIP already contained (audited, then kept)
+- `orchestrator/mission-coordinator.ts` (NEW): evidence intake from real
+  specialist events (bound to the running queue task — serial execution =
+  exact attribution; unbound events are NEVER guessed onto a step),
+  {{evidence:stepId}} template expansion resolving ONLY real VERIFIED
+  evidence (unknown/unverified → explicit markers, never fabricated),
+  bounded shared mission context (completed evidence + failed results +
+  progress, rendered as BACKGROUND data below the current instruction),
+  cancellation propagation (mission-cancel cancels its queued/running
+  queue tasks — no orphan specialists), forget() for bounded memory.
+- `scheduler.ts`: template expansion + contextBlock + step verification
+  derived from the specialist evidence ingested while the task was bound
+  (no evidence → UNVERIFIED — never upgraded); missions.onChange payloads
+  enriched on the SAME event (one source of truth).
+- `missions.ts`: settleStep accepts per-step verification + recomputes
+  mission-level verification at every settlement.
+- `jarvis/engine.ts` + types: missionVerification travels verbatim on the
+  report; an UNVERIFIED mission caps the report at PARTIAL (same honesty
+  rule as an unverified specialist).
+- `index.ts`: coordinator wiring, specialist-event intake, mission-cancel
+  propagation, MissionPanel in the HUD, mission delete → forget().
+- `tools/filesystem.ts`: write now READS BACK and compares before it may
+  claim success (§27/§28) — mismatch = FAILURE, unreadable = UNKNOWN,
+  success carries real read-back evidence (method write-readback).
+- `orchestrator/index.ts`: specialist results emitted EXACTLY once
+  (settlement idempotency guard, bounded set);
+  contextBlock flows into setDirectiveContext as background data.
+- `client`: MissionPanel (real mission rows, honest verification badges,
+  VERIFYING only while a completed step awaits evidence), jarvis.css,
+  store types, HudView mount.
+
+### REAL BUGS found by writing the missing tests (2, both fixed)
+1. **settleStep dropped the verification it accepted** — the signature
+   gained `outcome.verification` but the step field was never assigned,
+   so mission-level aggregation ALWAYS saw undefined → every mission
+   settled UNVERIFIED → JARVIS capped every mission report at PARTIAL
+   forever. Fix: `if (outcome.verification) step.verification = …`.
+2. **Two divergent aggregations** — the coordinator's verificationOf()
+   counted its in-memory evidence map while the store recomputed from
+   step.verification; after a restart the HUD/REST path and the JARVIS
+   path could disagree. Fix: SINGLE SOURCE OF TRUTH — verificationOf()
+   reads the store (`mission.verification ?? 'UNVERIFIED'`); the live
+   evidence map feeds settleStep + context/templates only.
+
+### Honest test-engineering notes (no weakening anywhere)
+- The permission-sabotage test needed write-without-read (0o222), NOT
+  0o000 (which also blocks the write itself → the honest failure has no
+  verification payload — verified by a live probe: EACCES on write).
+- Test drafts initially used a second TaskQueue instance instead of the
+  coordinator's own — a test bug (cancelMission walks the queue it was
+  CONSTRUCTED with), fixed by using make()'s queue.
+
+### Verification this phase (evidence, no claims)
+- Server `tsc --noEmit` clean; FULL suite **772 passed / 12 skipped /
+  0 failed** (724 → 772; skips = env-gated real-Chrome/live-desktop/
+  live-LLM). One earlier run hit the DOCUMENTED brain-integration
+  reconnect-timing load flake — 7/7 in isolation in 2.7s, final full run
+  green. Not a regression.
+- Client `tsc -b` clean + `vite build` clean.
+- E2E (real backend + vite + real Chrome): **8/8 PASS** (19.0s).
+- **LIVE VERIFIED SPECIALIST PROOF re-run after ALL changes** (real
+  server dist rebuilt first): `BLAXIN_REAL_CHROME=1 node scripts/
+  probe-browser-specialist.mjs` → **14/14 PASS, exit 0** — real WS task
+  "open http://127.0.0.1:<port>/specialist-target" → deterministic fast
+  path → policy gate approved (scope=task) → real Chrome via CDP →
+  verification SUCCESS url-match (title OBSERVED in page evidence:
+  "BLAXIN Specialist Verification Target") → specialist ledger settles
+  COMPLETED_VERIFIED → journal trail DELEGATED(budgets) → ACTION →
+  OBSERVATION → VERIFICATION(url-match) → RESULT(COMPleted_VERIFIED,
+  DETERMINISTIC 2311ms, 0 model calls, 1 tool call). This CLOSES Part
+  15's honest gap #1 (live VERIFIED specialist evidence end to end).
+
+### Honest remaining gaps
+- Specialist budgets are still code constants on the config surface
+  (setSpecialistConfig exists; defaults not user-tunable) — NEXT TARGET.
+- Voice physical output + live-LLM round trips: environment-blocked.
+- MissionPanel is additive to the HUD (real data only); full §21 UX
+  sweep for mission states happens in the Phase A completion audit.
+
+---
+
 ## SESSION — SPECIALIST BOUNDED-OBJECTIVE OWNERSHIP COMPLETE (2026-09-14, PART 15)
 
 Resumed the specialist-ownership implementation exactly where Part 14's
