@@ -29,6 +29,35 @@ describe('fast-path router: direct actions', () => {
     }
   });
 
+  it('classifies volume get/set/mute to the verified system-audio tool', () => {
+    for (const msg of ['volume', 'what is the volume', 'check the volume', 'is the sound muted']) {
+      const get = classifyDirect(msg);
+      expect(get?.tool).toBe('system-audio');
+      expect(get?.args.action).toBe('get');
+    }
+    const set = classifyDirect('set volume to 42');
+    expect(set?.tool).toBe('system-audio');
+    expect(set?.args).toMatchObject({ action: 'set', percent: 42 });
+    expect(classifyDirect('volume 80')?.args).toMatchObject({ action: 'set', percent: 80 });
+    expect(classifyDirect('turn the volume up to 65 percent')?.args).toMatchObject({ action: 'set', percent: 65 });
+    expect(classifyDirect('mute')?.args).toMatchObject({ action: 'mute' });
+    expect(classifyDirect('unmute')?.args).toMatchObject({ action: 'unmute' });
+  });
+
+  it('refuses out-of-range or nonsense volume values instead of guessing', () => {
+    expect(classifyDirect('set volume to 500')).toBeNull();
+    expect(classifyDirect('set volume to -10')).toBeNull();
+  });
+
+  it('routes organize-by-type to the gated bulk-files tool against real dirs only', () => {
+    const hit = classifyDirect(`organize the files in ${dir} by type`);
+    expect(hit?.tool).toBe('bulk-files');
+    expect(hit?.args).toMatchObject({ operation: 'organize' });
+    expect(classifyDirect(`sort files in ${dir}`)?.tool).toBe('bulk-files');
+    // A non-directory target is refused, never guessed.
+    expect(classifyDirect('organize the files in certainly-not-a-real-dir-xyz')).toBeNull();
+  });
+
   it('classifies system info by facet', () => {
     expect(classifyDirect('how much ram do i have')).toMatchObject({ tool: 'system-info', args: { info: 'memory' } });
     expect(classifyDirect('disk usage')).toMatchObject({ tool: 'system-info', args: { info: 'disk' } });

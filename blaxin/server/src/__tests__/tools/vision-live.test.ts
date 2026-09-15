@@ -64,7 +64,8 @@ describe('LIVE vision chain on the real display', () => {
     });
 
     // The PNG signature is real (the payload is a genuine image).
-    const prefix = Buffer.from(result.data!.base64, 'base64').subarray(0, 8).toString('hex');
+    const b64 = result.data!.base64 as string;
+    const prefix = Buffer.from(b64, 'base64').subarray(0, 8).toString('hex');
     expect(prefix).toBe('89504e470d0a1a0a'); // PNG magic
   }, 30000);
 });

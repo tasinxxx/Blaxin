@@ -1,17 +1,97 @@
 # BLAXIN Engineering Mission — Continuation State
 
-MISSION PHASE: A — LOCKED COMPLETE · PHASE B — IN PROGRESS (Stonic parity → 10× → final release)
-CURRENT OBJECTIVE: PHASE B — 10× BLAXIN (parity floor established; see docs/capability-matrix.md)
-CURRENT SUBTASK: 10× items — human-like screen understanding (now UNBLOCKED, see Part B1), volume tool (small parity leftover), bulk file verbs, battery telemetry
-CURRENT STATUS: Phase B audit COMPLETE — capability matrix written from Stonic's own public pages + BLAXIN source with pinned evidence; the ONE confirmed parity gap (vision: screenshots never reached the model) is now IMPLEMENTED, TESTED (801 passed) and LIVE-VERIFIED (real X pixels → model-facing image payload)
+MISSION PHASE: A — LOCKED COMPLETE · PHASE B — IN PROGRESS (parity floor established → 10×)
+CURRENT OBJECTIVE: PHASE B — 10× BLAXIN (see docs/capability-matrix.md; §4 gaps updated after Part B2)
+CURRENT SUBTASK: 10× items — closed-loop computer-use is PROVEN (Part B2); next: adaptive model routing depth, smooth-motion tuning, battery telemetry, dedupe verb, LLM decision stage when a vision model lands
+CURRENT STATUS: Objectives 1–3 of the Phase B directive COMPLETE with fresh evidence — closed-loop computer use 9/9 repeatable on real pixels; system-audio live-verified on the real PipeWire sink; bulk-files verified on the real filesystem. FULL suite 826 passed / 15 skipped / 0 failed. All three Stonic parity gaps from the audit are CLOSED.
 COMPLETED: Parts 15–19 (specialist ownership, recovery/re-plan, mission journal, live desktop + real-Chrome verification, tool verification-in-depth, JARVIS state reflection, mission coordination, budget config surface, branding, documentation)
 VERIFIED (fresh this audit): server tsc clean · FULL suite 779 passed / 12 skipped / 0 failed · client tsc -b + vite build clean · E2E 8/8 (18.2s) · real-Chrome probe 14/14 PASS · live X desktop 5/5 · real-Chrome CDP 6/6 · bundle-sync guard idempotent, bundled dist carries Parts 16–17 (md5-identical to server/dist) · version 1.4.0 consistent across VERSION/tauri/server/client/APP_VERSION · docs current (README + docs/specialists.md + docs/branding.md) · git tree clean, all work pushed to origin/main
 BLOCKED (environment, not code): live-LLM round trips (no provider key configured on this machine — deterministic model-path tests + probe cover the paths); voice PHYSICAL audio output (browser TTS/STT code is real and feature-detected, but no verifiable audio sink exists in this environment); live keystroke-receiver verification (host has a focused window; injection is honestly reported as "events sent; receiver not verified")
 KNOWN FAILURES: none open
 KNOWN LIMITATIONS: mission verification is derived in MissionStore (single source of truth); missions completed before coordination existed read UNVERIFIED; the on-disk .deb predates the Part 18 icons (CI regenerates assets on release; a local rebuild is required before any manual artifact check)
-NEXT EXACT ACTION (PHASE B, 10×): the screen-understanding loop is now OPEN (model can SEE verified screenshots on every screenshot tool call, all four provider families mapped). Next 10× targets in priority order: (1) closed-loop computer-use probe — screenshot → model grounds a coordinate → computer-control click → position read-back verifies (needs a provider key OR a deterministic scripted-vision harness); (2) system_audio tool with verified get→set→get read-back (last small parity leftover); (3) bulk file verbs (organize-by-type, dedupe, rename-by-pattern). Stonic rows that are MISSING by documented non-goal (WhatsApp) or UNVERIFIED by environment (voice physical, live-LLM) stay tracked in docs/capability-matrix.md §4.
+NEXT EXACT ACTION (PHASE B, 10×): every confirmed Stonic parity capability is now MATCHED or SUPERIOR (see the matrix — the three PARTIAL/MISSING rows are CLOSED). Continue the 10× mission in priority order: (1) adaptive model routing (route vision tasks to a vision model when one exists; honest degradation when not); (2) smooth-motion + focus-aware keyboard polish in computer-control (motion curves, per-window key targeting); (3) battery telemetry from /sys/class/power_supply; (4) content-hash dedupe verb for bulk-files; (5) mission-panel surfacing of bulk operation results. When a vision-capable local model OR a provider key becomes available: re-run probe-computer-use.mjs — the LLM decision stage lights up automatically and the loop upgrades from OCR-grounded to model-grounded.
 RELEASE BLOCKERS: v1.4.0 tag remains deferred — it follows the Phase B scope decision (parity-complete release)
 FINAL RELEASE STATUS: NOT STARTED (Phase B)
+
+---
+
+## SESSION — PHASE B OBJECTIVES 1–3 COMPLETE: COMPUTER-USE LOOP, SYSTEM AUDIO, BULK FILES (2026-09-15, PART B2)
+
+Continued the Phase B directive exactly in order. All three objectives landed with
+real execution evidence; no fabricated state anywhere.
+
+### OBJECTIVE 1 — CLOSED-LOOP COMPUTER USE: PROVEN 9/9, repeatable
+- NEW `scripts/computer-use/perceive.py`: OCR perception engine turning real
+  screenshot pixels into grounded, actionable boxes. Engineering that mattered
+  (each fixed a REAL observed failure):
+  · multi-scale upscale ensemble (3x+4x LANCZOS) — 3x alone mis-bounds rows;
+  · multi-PSM tesseract (3/6/11/12) — psm 11 misses button rows psm 6 catches;
+  · cross-run merge (same text + overlapping box → best confidence + `modesSeen`
+    agreement count);
+  · word-aware RANKED grounding — exact-token beats substring beats fuzzy; a
+    matched ROW is clicked on the matching WORD (row centers fall BETWEEN buttons);
+  · coordinate mapping back to real screen space; PNG magic asserted; honest
+    JSON errors (no engine / unreadable image / non-PNG), never empty-success.
+- NEW `scripts/computer-use/gs-util.py`: smooth real cursor travel (PyAutoGUI
+  easing) behind a two-key guard (BLAXIN_ALLOW_PYAUTOGUI + probe display) —
+  cannot act on the user's desktop.
+- NEW `scripts/computer-use/probe-computer-use.mjs`: the full loop on a PRIVATE
+  Xvfb display: stage → real GUI app (xmessage, OCR-safe random marker, marker
+  exists ONLY on the button) → real screenshot (import -window root) → PNG
+  validated → OCR perception → DECISION STAGE (local Ollama vision model when
+  one exists, via the same images-mapping contract; otherwise deterministic
+  decider over OCR grounding with an honest `unverified-fallback` line — never
+  a fabricated "the AI saw it") → smooth travel + real click → observed process
+  exit → verified window-gone read-back → post-action screenshot.
+- **Evidence: 9/9 PASS three consecutive runs** (fresh random markers each run;
+  conf 61–92; click points verified on-target; teardown really observed).
+- The model stage probed the REAL local Ollama: 6 models, NONE vision-capable
+  (families qwen3/llama have no clip) — reported honestly, decision fell back to
+  OCR grounding. Loop stays real either way.
+- Env-gated wrapper `__tests__/tools/computer-use.test.ts` runs the probe in
+  the ladder (BLAXIN_COMPUTER_USE=1) — passed in this session's run.
+
+### OBJECTIVE 2 — SYSTEM AUDIO: implemented + LIVE-VERIFIED on the real sink
+- NEW `tools/system-audio.ts`: get/set/mute/unmute via wpctl (PipeWire),
+  injectable runner seam, same protection conventions as the other tools.
+  Verification-in-depth: a SET is SUCCESS only when a FRESH read-back confirms
+  the level (±1%); mute state read from the real status output; missing wpctl
+  is an honest unavailability. Registered LOW risk (reversible user tuning).
+- Deterministic router: "volume", "what is the volume", "check the volume",
+  "set volume to 42", "volume 80", "mute", "unmute" → zero-model-call routes;
+  out-of-range values refused, never guessed.
+- Tests: `system-audio.test.ts` (9 — incl. a silently-ignoring OS caught by
+  read-back), `system-audio-live.test.ts` **ran LIVE** on this machine's real
+  PipeWire sink (get → set → fresh-instance get → restore original).
+
+### OBJECTIVE 3 — BULK FILE VERBS: implemented + verified on the real filesystem
+- NEW `tools/bulk-files.ts`: organize-by-extension, batch_move, batch_copy,
+  batch_delete, bulk_rename (prefix/suffix/replace). Per-item verification
+  (move: source gone + destination present; copy: size match; delete: absence),
+  honest aggregate (any failed item → batch FAILURE naming the items), 500-item
+  cap, dotfile/protected-path guards (never touches .files, keys, /etc...),
+  never-overwrite policy, ALWAYS requires confirmation, HIGH risk tier.
+- Router: `organize the files in <dir> by type` → bulk-files (real-dir gated).
+- Tests: `bulk-files.test.ts` (13, real filesystem — two initial failures were
+  TEST bugs, fixed in the tests, not the implementation).
+
+### Verification this phase (evidence, no claims)
+- Server `tsc --noEmit` clean; FULL suite **826 passed / 15 skipped / 0 failed**
+  (801 → 826; skips = env-gated live runs). Focused: direct-router 15,
+  bulk-files 13, system-audio 9, risk-permission 8.
+- Client `tsc -b` + `vite build` clean; E2E **8/8 PASS** (21.2s).
+- Real-Chrome specialist probe: **14/14 PASS**. Computer-use probe: **9/9**.
+- bundle-sync-guard synced then idempotent; packaged dist carries the new
+  tools (BulkFilesTool/SystemAudioTool probed).
+- `docs/capability-matrix.md` reclassified: screen-awareness MATCHED,
+  grounded GUI control MATCHED, volume CLOSED (was MISSING), file management
+  MATCHED (was PARTIAL); §4 backlog updated.
+
+### Honest remaining gaps
+- LLM decision stage in the computer-use loop is `unverified-fallback` until a
+  vision-capable model exists here (no provider key; local Ollama has no vision
+  family). The payload contract and the loop itself are fully proven.
+- Voice physical round trip: environment-blocked (unchanged).
 
 ---
 

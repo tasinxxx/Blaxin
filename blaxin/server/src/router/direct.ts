@@ -182,7 +182,31 @@ export function classifyDirect(rawMessage: string): DirectAction | null {
     return { tool: 'clipboard', args: { action: 'read' }, summary: 'Reading the clipboard…' };
   }
 
-  // ── System info ───────────────────────────────────────────────
+  // ── Volume (deterministic, verified get→set→get tool) ────────
+  if (
+    lower === 'volume' || /^(what('s| is)\s+)?(the\s+)?volume(\s+(level|now))?$/.test(lower) ||
+    /^(how (loud|quiet) is (my\s+)?(computer|pc|system))$/.test(lower) ||
+    /^(check|show|get)(\s+(me))?\s+(the\s+)?volume$/.test(lower) ||
+    /^(is (the\s+)?(sound|audio|volume) (on|muted))$/.test(lower)
+  ) {
+    return { tool: 'system-audio', args: { action: 'get' }, summary: 'Checking the volume…' };
+  }
+  const volSet = lower.match(/^(?:set\s+)?(?:the\s+)?volume\s+(?:to\s+)?(\d{1,3})\s*(?:%|percent)?$|(?:set|turn)\s+(?:the\s+)?volume\s+(?:up|down)?\s*(?:to\s+)?(\d{1,3})\s*(?:%|percent)?$/);
+  if (volSet) {
+    const pct = Number(volSet[1] ?? volSet[2]);
+    if (Number.isFinite(pct) && pct >= 0 && pct <= 150) {
+      return { tool: 'system-audio', args: { action: 'set', percent: pct }, summary: `Setting volume to ${pct}%…` };
+    }
+    return null; // out-of-range → not a command the fast path can make true
+  }
+  if (/^(mute|mute the (sound|audio|volume|system)|turn (the\s+)?(sound|audio|volume) off)$/.test(lower)) {
+    return { tool: 'system-audio', args: { action: 'mute' }, summary: 'Muting…' };
+  }
+  if (/^(unmute|unmute the (sound|audio|volume|system)|turn (the\s+)?(sound|audio|volume) (back\s+)?on)$/.test(lower)) {
+    return { tool: 'system-audio', args: { action: 'unmute' }, summary: 'Unmuting…' };
+  }
+
+  // ── System info ───────────────────────────────────────────
   if (
     /^(how much (ram|memory) (do i (have|use)|is (free|used|left)))/.test(lower) ||
     lower === 'ram' || lower === 'memory' || lower === 'free memory' ||
@@ -366,6 +390,20 @@ export function classifyDirect(rawMessage: string): DirectAction | null {
         tool: 'computer-control',
         args: { action: 'launch_app', app: target },
         summary: `Launching ${target}…`,
+      };
+    }
+    return null;
+  }
+
+  // ── Bulk file verbs (organize / batch ops — gated + verified) ─
+  const organizeMatch = text.match(/^(?:organize|organise|sort|tidy)\s+(?:the\s+)?(?:files\s+)?(?:in\s+|in\s+the\s+)?(.+?)(?:\s+by\s+(?:file\s+)?(?:type|extension))?$/i);
+  if (organizeMatch) {
+    const target = cleanTrailing(organizeMatch[1]);
+    if (target && pathKind(target) === 'dir') {
+      return {
+        tool: 'bulk-files',
+        args: { operation: 'organize', path: expandHome(target) },
+        summary: `Organizing ${target} by file type…`,
       };
     }
     return null;

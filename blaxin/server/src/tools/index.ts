@@ -10,6 +10,8 @@ import { WebAgentTool } from './web-agent.js';
 import { ClipboardTool } from './clipboard.js';
 import { SearchTool } from './search.js';
 import { SystemInfoTool } from './system-info.js';
+import { SystemAudioTool } from './system-audio.js';
+import { BulkFilesTool } from './bulk-files.js';
 import { logger } from '../utils/logger.js';
 
 export class ToolRegistry {
@@ -26,6 +28,8 @@ export class ToolRegistry {
     this.register(new ClipboardTool());
     this.register(new SearchTool());
     this.register(new SystemInfoTool());
+    this.register(new SystemAudioTool());
+    this.register(new BulkFilesTool());
   }
 
   private register(tool: Tool): void {
@@ -133,6 +137,8 @@ const RISK_TIERS: Record<string, RiskTier> = {
   filesystem: 'MEDIUM',
   terminal: 'MEDIUM',
   'computer-control': 'MEDIUM',
+  'system-audio': 'LOW', // volume get/set is reversible user-scope tuning
+  'bulk-files': 'HIGH', // mutates many paths at once — always gated + confirmed
 };
 
 const DEFAULT_RISK_TIER: RiskTier = 'MEDIUM';
