@@ -2,22 +2,54 @@
 
 MISSION PHASE: A — finish the current running update (Phase B = Stonic parity → 10× → release, GATED behind Phase A lock)
 CURRENT OBJECTIVE: Phase A completion audit against the §-checklist
-CURRENT SUBTASK: config-surface wiring DONE (Part 17); §-audit next
+CURRENT SUBTASK: config surface + branding integration DONE (Parts 17–18); §-audit next
 CURRENT STATUS: All gates green (tests, typecheck, build, E2E, live real-Chrome proof)
-COMPLETED: Mission coordination verified end to end (Part 16); filesystem write read-back verification; live VERIFIED browser-specialist proof; specialist/recovery budgets now user-configurable via persisted config (agent.specialist + agent.recovery, per-key back-fill, applied to the orchestrator at startup)
-VERIFIED: server tsc clean; FULL suite 779 passed / 12 skipped / 0 failed; client tsc -b + vite build clean; E2E 8/8 (19.0s); real-Chrome probe 14/14 PASS after ALL changes
+COMPLETED: Mission coordination verified end to end (Part 16); filesystem write read-back verification; live VERIFIED browser-specialist proof; specialist/recovery budgets user-configurable via persisted config (Part 17); updated blaxinlogo2.png integrated as the official brand source with ALL derived assets regenerated through the standard generator (Part 18)
+VERIFIED: server tsc clean; FULL suite 779 passed / 12 skipped / 0 failed; client tsc -b + vite build clean; E2E 8/8 (17.2s); real-Chrome probe 14/14 PASS; generated icons reproduce the generator pipeline from the NEW source (vs old-brand pipeline: 18.7M pixel diff — genuinely regenerated); source file is pixel-identical to the user's asset
 IN PROGRESS: nothing in flight — Phase A §-completion audit next
 BLOCKED: voice physical output + live-LLM round trips remain environment-blocked (no provider key / no verifiable audio sink) — unchanged
 KNOWN FAILURES: none open
-KNOWN LIMITATIONS: mission verification derives from MissionStore (single source of truth) — the coordinator's live evidence map feeds settleStep and provides context/template detail, NOT a second aggregation; missions completed before coordination existed read UNVERIFIED (honest — absence of evidence is never upgraded)
-FILES CHANGED (Part 17): MODIFIED server/src/{types.ts,utils/config.ts,index.ts} · NEW server/src/__tests__/budget-config.test.ts (7)
-TESTS: budget-config 7/7 · FULL 779/12/0 · E2E 8/8 · probe 14/14
-RUNTIME VERIFICATION: real-Chrome probe re-run after ALL Part-17 changes: 14/14 PASS, exit 0
-COMMITS: a276451 (Part 15) · 321d744 + dcad670 + 04b0bef (Part 16) · this session's commit (next)
+KNOWN LIMITATIONS: mission verification derives from MissionStore (single source of truth) — the coordinator's live evidence map feeds settleStep and provides context/template detail, NOT a second aggregation; missions completed before coordination existed read UNVERIFIED (honest — absence of evidence is never upgraded); the .deb on disk predates the Part 18 icon change — CI rebuilds assets on release, but a local `cargo tauri build --bundles deb` re-run is needed before any manual artifact verification
+FILES CHANGED (Part 18): MODIFIED brand/{blaxin-logo-source.png,blaxin-mark.png,blaxin-mark-dark.png,blaxin-wordmark.png} · MODIFIED src-tauri/icons/{32x32,128x128,128x128@2x,icon}.png · MODIFIED client/public/blaxin-mark.png · MODIFIED docs/branding.md
+TESTS: FULL 779/12/0 · E2E 8/8 · probe 14/14 (all after the branding change; no test impact expected or observed)
+RUNTIME VERIFICATION: real-Chrome probe 14/14 PASS after Part 17; pixel-level verification of every regenerated brand asset against the generator pipeline
+COMMITS: a276451 (Part 15) · 321d744 + dcad670 + 04b0bef (Part 16) · 6812b34 (Part 17) · 68ef4b1 + c6953a8 (Part 18) — all pushed to origin/main
 CURRENT VERSION: 1.4.0 (UNTAGGED — tag still deferred)
-NEXT EXACT ACTION: (1) commit Part 17 (budget config surface) and push; (2) run the Phase A §-completion audit (implementation/tests/UI/backend/specialist system/missions/browser-control/verification/recovery/memory/packaging/docs/branding/release readiness) and record the honest per-§ table; (3) resolve audit findings, then v1.4.0 tag decision
+NEXT EXACT ACTION: Run the Phase A §-completion audit and write the honest per-§ table into CONTINUATION-STATE: for each § of the directive (implementation, tests, UI, backend, specialist system, mission system, browser/computer control, verification, recovery, memory, packaging, documentation, branding, release readiness) classify VERIFIED / PARTIAL / MISSING / ENVIRONMENT-BLOCKED with the evidence. Resolve findings; the v1.4.0 tag decision follows the audit. Do NOT start Phase B (Stonic audit) before Phase A is locked COMPLETE.
 RELEASE BLOCKERS: v1.4.0 tag deferred until the Phase A §-audit is complete and its findings resolved
 FINAL RELEASE STATUS: NOT STARTED (Phase B)
+
+---
+
+## SESSION — OFFICIAL LOGO INTEGRATION (2026-09-15, PART 18)
+
+Continued per §24 (branding). Found the user's `blaxinlogo2.png`
+(`~/Videos/`, fresh mtime) differs from the committed brand source —
+verified by pixel comparison, not assumption.
+
+### What changed
+- Copied the user's asset OVER `brand/blaxin-logo-source.png`
+  (pixel-identical copy committed to the repo — never a filesystem
+  reference).
+- Ran the standard generator (`python3 brand/generate-icons.py`):
+  regenerated `blaxin-mark.png`, `blaxin-mark-dark.png`,
+  `blaxin-wordmark.png`, all four Tauri icons, and the client favicon
+  (`client/public/blaxin-mark.png` — consumed by index.html, Sidebar,
+  Setup Wizard, Chat empty state). Third-party icons untouched.
+- `docs/branding.md`: recorded the integration and the copy-then-
+  regenerate workflow for future asset updates.
+
+### Verification (pixel-level, honest)
+- Source in repo is pixel-identical to the user's file (byte compare).
+- Generated 256px icon reproduces the generator's own pipeline from the
+  NEW source (near-identical), and differs from a pipeline rebuild of
+  the OLD committed source by 18.7M total pixel units — the icons are
+  genuinely the new mark, not stale files.
+- No test impact: FULL suite 779/12/0, client build clean, E2E 8/8
+  (17.2s) after the change.
+- The on-disk .deb still embeds the old icon set; CI regenerates assets
+  on release, and a local rebuild is required before any manual
+  artifact check (recorded in KNOWN LIMITATIONS).
 
 ---
 
