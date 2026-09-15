@@ -14,6 +14,11 @@ on any individual machine:
 blaxin/brand/blaxin-logo-source.png
 ```
 
+The current asset is the user-supplied `blaxinlogo2.png` (integrated
+2026-09-15). When the official asset is updated on a machine, copy the file
+into the path above (never reference the filesystem path directly) and
+regenerate the derived assets per the instructions below.
+
 All derived assets are generated from this single file. The logo design is
 never redrawn or altered; derived assets only scale it, composite it on
 brand black, or add padding.
