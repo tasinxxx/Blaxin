@@ -1,25 +1,80 @@
 # BLAXIN Engineering Mission — Continuation State
 
-MISSION PHASE: A — finish the current running update (Phase B = Stonic parity → 10× → release, GATED behind Phase A lock)
-CURRENT OBJECTIVE: Phase A completion audit against the §-checklist
-CURRENT SUBTASK: config surface + branding integration DONE (Parts 17–18); §-audit next
-CURRENT STATUS: All gates green (tests, typecheck, build, E2E, live real-Chrome proof)
-COMPLETED: Mission coordination verified end to end (Part 16); filesystem write read-back verification; live VERIFIED browser-specialist proof; specialist/recovery budgets user-configurable via persisted config (Part 17); updated blaxinlogo2.png integrated as the official brand source with ALL derived assets regenerated through the standard generator (Part 18)
-VERIFIED: server tsc clean; FULL suite 779 passed / 12 skipped / 0 failed; client tsc -b + vite build clean; E2E 8/8 (17.2s); real-Chrome probe 14/14 PASS; generated icons reproduce the generator pipeline from the NEW source (vs old-brand pipeline: 18.7M pixel diff — genuinely regenerated); source file is pixel-identical to the user's asset
-IN PROGRESS: nothing in flight — Phase A §-completion audit next
-BLOCKED: voice physical output + live-LLM round trips remain environment-blocked (no provider key / no verifiable audio sink) — unchanged
+MISSION PHASE: A — LOCKED COMPLETE · PHASE B — READY TO START (Stonic parity → 10× → final release)
+CURRENT OBJECTIVE: PHASE B — Stonic capability audit (parity floor), then 10×
+CURRENT SUBTASK: begin the Stonic capability audit (§7–§9 of the master directive)
+CURRENT STATUS: Phase A audit complete — every auditable item VERIFIED with fresh evidence; the only BLOCKED items are environment-gated (no provider key, no verifiable audio sink, no live X keystroke receiver test)
+COMPLETED: Parts 15–19 (specialist ownership, recovery/re-plan, mission journal, live desktop + real-Chrome verification, tool verification-in-depth, JARVIS state reflection, mission coordination, budget config surface, branding, documentation)
+VERIFIED (fresh this audit): server tsc clean · FULL suite 779 passed / 12 skipped / 0 failed · client tsc -b + vite build clean · E2E 8/8 (18.2s) · real-Chrome probe 14/14 PASS · live X desktop 5/5 · real-Chrome CDP 6/6 · bundle-sync guard idempotent, bundled dist carries Parts 16–17 (md5-identical to server/dist) · version 1.4.0 consistent across VERSION/tauri/server/client/APP_VERSION · docs current (README + docs/specialists.md + docs/branding.md) · git tree clean, all work pushed to origin/main
+BLOCKED (environment, not code): live-LLM round trips (no provider key configured on this machine — deterministic model-path tests + probe cover the paths); voice PHYSICAL audio output (browser TTS/STT code is real and feature-detected, but no verifiable audio sink exists in this environment); live keystroke-receiver verification (host has a focused window; injection is honestly reported as "events sent; receiver not verified")
 KNOWN FAILURES: none open
-KNOWN LIMITATIONS: mission verification derives from MissionStore (single source of truth) — the coordinator's live evidence map feeds settleStep and provides context/template detail, NOT a second aggregation; missions completed before coordination existed read UNVERIFIED (honest — absence of evidence is never upgraded); the .deb on disk predates the Part 18 icon change — CI rebuilds assets on release, but a local `cargo tauri build --bundles deb` re-run is needed before any manual artifact verification
-FILES CHANGED (Part 18): MODIFIED brand/{blaxin-logo-source.png,blaxin-mark.png,blaxin-mark-dark.png,blaxin-wordmark.png} · MODIFIED src-tauri/icons/{32x32,128x128,128x128@2x,icon}.png · MODIFIED client/public/blaxin-mark.png · MODIFIED docs/branding.md
-TESTS: FULL 779/12/0 · E2E 8/8 · probe 14/14 (all after the branding change; no test impact expected or observed)
-RUNTIME VERIFICATION: real-Chrome probe 14/14 PASS after Part 17; pixel-level verification of every regenerated brand asset against the generator pipeline
-COMMITS: a276451 (Part 15) · 321d744 + dcad670 + 04b0bef (Part 16) · 6812b34 (Part 17) · 68ef4b1 + c6953a8 (Part 18) — all pushed to origin/main
-CURRENT VERSION: 1.4.0 (UNTAGGED — tag still deferred)
-NEXT EXACT ACTION: Run the Phase A §-completion audit and write the honest per-§ table into CONTINUATION-STATE: for each § of the directive (implementation, tests, UI, backend, specialist system, mission system, browser/computer control, verification, recovery, memory, packaging, documentation, branding, release readiness) classify VERIFIED / PARTIAL / MISSING / ENVIRONMENT-BLOCKED with the evidence. Resolve findings; the v1.4.0 tag decision follows the audit. Do NOT start Phase B (Stonic audit) before Phase A is locked COMPLETE.
-RELEASE BLOCKERS: v1.4.0 tag deferred until the Phase A §-audit is complete and its findings resolved
+KNOWN LIMITATIONS: mission verification is derived in MissionStore (single source of truth); missions completed before coordination existed read UNVERIFIED; the on-disk .deb predates the Part 18 icons (CI regenerates assets on release; a local rebuild is required before any manual artifact check)
+NEXT EXACT ACTION (PHASE B): execute the Stonic capability audit per §8: enumerate publicly observable/relevant Stonic capabilities for this product category (§9 floor list: NL commands, voice, screen awareness, CV, mouse, keyboard, app control, files, browser automation, multi-step tasks, autonomy, memory, agents, system control/monitoring, contextual interaction, real-time task visibility, cinematic interface, local-first), map each to the real BLAXIN implementation, verify by test/runtime evidence, and classify MATCHED / SUPERIOR / PARTIAL / MISSING / UNVERIFIED in a capability matrix (docs/capability-matrix.md). No cloning — independent implementation only. Parity gaps then become the Phase B implementation queue.
+RELEASE BLOCKERS: v1.4.0 tag remains deferred — it follows the Phase B scope decision (parity-complete release)
 FINAL RELEASE STATUS: NOT STARTED (Phase B)
 
 ---
+
+## SESSION — PHASE A §-COMPLETION AUDIT (2026-09-15, PART 19) — VERDICT: LOCKED COMPLETE
+
+Audited EVERY audit-required item with FRESH evidence (not prior claims):
+reran the full ladder, probed the bundled dist, verified versions, docs,
+and git state. Findings fixed autonomously where fixable.
+
+### The audit table (honest classification, evidence-backed)
+
+| Area | Classification | Evidence (fresh, this audit) |
+|---|---|---|
+| Implementation completeness (server) | VERIFIED | tsc clean; 779/12/0 suite; all subsystems have real modules + pinned tests |
+| Mission coordination | VERIFIED | mission-coordinator 27/27; store-side aggregation single-source; UNVERIFIED caps Jarvis at PARTIAL |
+| Specialist ownership | VERIFIED | specialist-ownership 24/24 + browser-specialist 14/14 (budgets/deadline/idempotent settlement/objectiveId on every event) |
+| Budget configuration | VERIFIED | budget-config 7/7 (defaults, per-key back-fill, round-trip, cache invalidation, degradation); applied at startup |
+| Recovery / re-plan | VERIFIED | deterministic-recovery 11/11 + recovery-policy 32/32 + journal-recovery 4/4 (bounded ladder, Brain escalation only after exhaustion) |
+| Deterministic execution | VERIFIED | direct-router + orchestrator-performance suites; probe shows DETERMINISTIC route, 0 model calls |
+| Verification (tools) | VERIFIED | tool-verification 22/22 + filesystem-write 8/8 (read-back) + browser tri-state suites; UNKNOWN never becomes SUCCESS |
+| Memory | VERIFIED | memory-layers 21/21 + memory-orchestrator + read-back tests; REST inspection endpoints |
+| Browser execution (real) | VERIFIED | real-Chrome CDP 6/6 (live run this audit) + browser-nav 14 + web-agent-honesty; probe 14/14 live proof |
+| Computer control (real) | VERIFIED | live X desktop 5/5 (live run this audit); keystroke receiver honestly UNVERIFIED-BY-ENVIRONMENT |
+| Real WebSocket behavior | VERIFIED | probe drives a real WS task end-to-end; brain-integration real-socket suites; E2E over real backend |
+| UI state honesty | VERIFIED | HUD fabrication audit (Part 8) + MissionPanel renders server-computed badges only; every panel fed by real WS/REST events |
+| Accessibility | VERIFIED | shared useDialogA11y (focus trap/Escape/restore), aria-labels on composer/send, role=status live regions, reduced-motion support |
+| Branding / logo | VERIFIED | source pixel-identical to the user's blaxinlogo2.png; all 8 derived assets regenerated via the standard generator; icons reproduce the pipeline from the NEW source (vs old-brand: 18.7M pixel diff) |
+| Packaging / bundle sync | VERIFIED | bundle-sync-guard re-run: synced then idempotent "current"; bundled dist md5-identical to server/dist; symbol probes: read-back verification + coordinator + budget config all PRESENT in the bundled copy |
+| Version consistency | VERIFIED | 1.4.0 in VERSION, tauri.conf.json, server, client, APP_VERSION |
+| Server tests | VERIFIED | 779 passed / 12 skipped / 0 failed (skips = env-gated live runs) |
+| Client typecheck + build | VERIFIED | tsc -b clean; vite build clean |
+| E2E | VERIFIED | 8/8 PASS (18.2s, real backend + vite + real Chrome) |
+| Live runtime probe | VERIFIED | 14/14 PASS, exit 0 — real server, real WS, real Chrome, COMPLETED_VERIFIED from observed title, honest journal trail |
+| Regression safety | VERIFIED | full suite green after every change; no test weakened or removed; 2 REAL production bugs were FIXED by new tests, not hidden |
+| Documentation | VERIFIED | README subsystems + features cover coordination/ownership/budgets; docs/specialists.md NEW; docs/branding.md updated; this file current |
+| Git state | VERIFIED | clean tree; all commits pushed to origin/main |
+| CONTINUATION-STATE consistency | VERIFIED | header matches repo reality; per-part sessions recorded with evidence |
+| Voice (physical) | BLOCKED | browser SpeechRecognition/SpeechSynthesis code is real + feature-detected (useVoice, VoiceTab); no verifiable audio sink in this environment — physical verification not honestly claimable |
+| Live-LLM round trip | BLOCKED | no provider key on this machine; model paths covered deterministically; Ollama local runtime suite exists |
+
+### Gaps found by the audit — ALL FIXED
+1. README lacked Mission Coordination / Specialist Ownership subsystem and
+   Features entries → added (commit 3ca9bb8).
+2. No specialist/mission documentation page → docs/specialists.md NEW.
+3. Bundled server dist had drifted (Parts 16–17 post-dated it) →
+   bundle-sync-guard re-synced; verified idempotent + md5-identical.
+
+### PHASE A COMPLETION LOCK — checklist satisfied
+[x] Current update implementation complete · [x] focused tests pass ·
+[x] regression tests pass · [x] typecheck passes · [x] build passes ·
+[x] E2E passes · [x] real-runtime verification completed where possible ·
+[x] known failures resolved or honestly documented (2 env-blocked items) ·
+[x] no fake-success path in the completed scope (verification-in-depth
+swept every tool; UNVERIFIED caps PARTIAL everywhere) · [x] documentation
+updated · [x] CONTINUATION-STATE updated · [x] milestone COMPLETE ·
+[x] git coherent · [x] checkpoint commits pushed.
+
+**PHASE A = LOCKED COMPLETE.** Phase B (Stonic parity audit) is the next
+exact action; it must NOT clone anything — independent implementation
+only. The v1.4.0 tag remains deferred to the Phase B release decision.
+
+---
+
 
 ## SESSION — OFFICIAL LOGO INTEGRATION (2026-09-15, PART 18)
 
