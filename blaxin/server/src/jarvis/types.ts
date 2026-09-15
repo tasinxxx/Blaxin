@@ -128,6 +128,14 @@ export interface AgentReport {
     /** Honest next action for a non-terminal mission (pause/resume paths). */
     nextAction: string;
   };
+  /**
+   * Mission-directive reports only: the mission's REAL aggregated
+   * verification (mission coordination) — VERIFIED only when every
+   * completed step carried real verification evidence. UNVERIFIED is
+   * carried verbatim and caps the report at PARTIAL (same honesty rule
+   * as an unverified specialist).
+   */
+  missionVerification?: 'VERIFIED' | 'PARTIAL' | 'UNVERIFIED';
 }
 
 /**

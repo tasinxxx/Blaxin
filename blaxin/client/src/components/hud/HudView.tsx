@@ -8,6 +8,7 @@ import { JarvisPanel } from './JarvisPanel';
 import { AgencyPanel } from './AgencyPanel';
 import { MemoryBankPanel } from './MemoryBankPanel';
 import { TaskQueuePanel } from './TaskQueuePanel';
+import { MissionPanel } from './MissionPanel';
 import { AgentTerminalPanel } from './AgentTerminalPanel';
 import { NetworkHubPanel } from './NetworkHubPanel';
 import { SecurityVaultPanel } from './SecurityVaultPanel';
@@ -58,6 +59,7 @@ export function HudView({ sendMessage, stopAgent, clearHistory, queueAction }: H
           <JarvisPanel />
           <AgencyPanel />
           <MemoryBankPanel />
+          <MissionPanel />
           <TaskQueuePanel onQueueAction={queueAction} />
         </div>
 

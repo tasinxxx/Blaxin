@@ -72,6 +72,8 @@ export interface MissionStep {
   result?: string;
   error?: string;
   checkpoint?: { completedAt: number; summary: string };
+  /** Real per-step verification (mission coordination). */
+  verification?: 'VERIFIED' | 'PARTIAL' | 'UNVERIFIED';
 }
 
 export interface Mission {
@@ -88,6 +90,8 @@ export interface Mission {
   completedAt?: number;
   history: string[];
   errors: string[];
+  /** Real aggregated mission verification (mission coordination). */
+  verification?: 'VERIFIED' | 'PARTIAL' | 'UNVERIFIED';
 }
 
 export interface SecurityEvent {

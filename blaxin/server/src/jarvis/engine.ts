@@ -95,6 +95,8 @@ export class JarvisEngine {
   private currentSpecialist: JarvisSpecialistState | null = null;
   /** Real checkpoint state of a PAUSED mission (mission-control reporting). */
   private lastMissionCheckpoint: AgentReport['missionCheckpoint'] | null = null;
+  /** Real aggregated verification of the mission that just terminated. */
+  private lastMissionVerification: AgentReport['missionVerification'] | null = null;
 
   constructor(deps: JarvisDeps) {
     this.events = deps.events;
@@ -364,10 +366,19 @@ export class JarvisEngine {
       // The checkpoint truth of the TERMINAL snapshot is what the report
       // carries (mission-control contract: state where it stopped).
       this.lastMissionCheckpoint = this.extractCheckpoint(mission);
+      // Mission coordination: the REAL aggregated verification travels
+      // verbatim. An UNVERIFIED mission caps the report at PARTIAL in
+      // composeReport (same honesty rule as an unverified specialist).
+      const mv = mission.verification;
+      this.lastMissionVerification =
+        mv === 'VERIFIED' || mv === 'PARTIAL' || mv === 'UNVERIFIED' ? mv : undefined;
       this.composeReport('completed');
     } else if (mission.status === 'failed' || mission.status === 'cancelled') {
       this.ingestMissionEvidence(mission);
       this.lastMissionCheckpoint = this.extractCheckpoint(mission);
+      const mv = mission.verification;
+      this.lastMissionVerification =
+        mv === 'VERIFIED' || mv === 'PARTIAL' || mv === 'UNVERIFIED' ? mv : undefined;
       this.composeReport('error');
     }
     // 'queued' | 'running' | 'paused': mission continues — no report.
@@ -552,11 +563,14 @@ export class JarvisEngine {
       const unverifiedSpecialist = sp
         && sp.status !== 'FAILED' && sp.status !== 'TIMED_OUT' && sp.status !== 'CANCELLED'
         && sp.verification === 'UNVERIFIED';
+      // Mission coordination: a completed mission whose aggregated step
+      // evidence is UNVERIFIED is capped at PARTIAL for the same reason.
+      const unverifiedMission = this.lastMissionVerification === 'UNVERIFIED';
       if (terminalState === 'error') {
         status = 'FAILED';
       } else if (failed.length > 0 || skipped.length > 0) {
         status = 'PARTIAL';
-      } else if (unverifiedSpecialist) {
+      } else if (unverifiedSpecialist || unverifiedMission) {
         status = 'PARTIAL';
       } else {
         status = 'SUCCESS';
@@ -581,6 +595,9 @@ export class JarvisEngine {
       // mission store snapshot that just terminated). Nulls are honest:
       // a mission without checkpoints reports none.
       missionCheckpoint: this.lastMissionCheckpoint ?? undefined,
+      // Real aggregated mission verification (mission coordination) —
+      // verbatim, never upgraded.
+      missionVerification: this.lastMissionVerification ?? undefined,
       // Real specialist delegation of THIS run (when one existed). The
       // verification level travels verbatim — UNVERIFIED is never
       // upgraded anywhere downstream.
@@ -616,6 +633,7 @@ export class JarvisEngine {
     this.currentRecovery = null;
     this.currentSpecialist = null;
     this.lastMissionCheckpoint = null;
+    this.lastMissionVerification = null;
     this.activeDirective = null;
     this.setPhase('idle');
   }

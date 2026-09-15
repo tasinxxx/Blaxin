@@ -594,3 +594,34 @@
   white-space: nowrap; color: var(--jh-text, #c9d6e8);
 }
 .jh-agency-state { flex-shrink: 0; font-size: 9px; letter-spacing: 1px; }
+
+/* ── Missions panel — real multi-specialist missions ────────── */
+.jh-mission-empty {
+  font-size: 11px; color: var(--jh-dim, #7d8aa5); letter-spacing: 1.5px;
+  padding: 8px 0; font-family: var(--jh-mono, monospace);
+}
+.jh-mission { margin-bottom: 10px; font-family: var(--jh-mono, monospace); }
+.jh-mission-head { display: flex; align-items: baseline; justify-content: space-between; gap: 6px; }
+.jh-mission-obj {
+  font-size: 11px; color: var(--jh-text, #c9d6e8); overflow: hidden;
+  text-overflow: ellipsis; white-space: nowrap; flex: 1; min-width: 0;
+}
+.jh-mission-v { font-size: 9px; letter-spacing: 1px; flex-shrink: 0; }
+.jh-mission-v-verified { color: #00e676; }
+.jh-mission-v-partial { color: #ffd54f; }
+.jh-mission-v-unverified { color: var(--jh-dim, #7d8aa5); }
+.jh-mission-meta {
+  font-size: 9px; letter-spacing: 1px; color: var(--jh-dim, #7d8aa5); margin: 2px 0 4px;
+}
+.jh-mission-step {
+  display: flex; align-items: baseline; gap: 6px;
+  font-size: 10px; padding: 2px 0;
+  border-left: 2px solid rgba(0, 240, 255, 0.25); padding-left: 6px;
+}
+.jh-mission-step-n { color: var(--jh-dim, #7d8aa5); font-size: 9px; min-width: 10px; }
+.jh-mission-step-d {
+  flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis;
+  white-space: nowrap; color: var(--jh-text, #c9d6e8);
+}
+.jh-mission-step-s { flex-shrink: 0; font-size: 8px; letter-spacing: 1px; }
+.jh-mission-more { font-size: 9px; color: var(--jh-dim, #7d8aa5); padding-left: 8px; }

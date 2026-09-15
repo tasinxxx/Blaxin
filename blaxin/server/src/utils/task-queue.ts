@@ -41,6 +41,8 @@ export interface QueueTask {
     reason: string;
     successCondition?: string;
     source: string;
+    /** Bounded shared-mission context (mission coordination; background data). */
+    contextBlock?: string;
   };
   createdAt: number;
   startedAt?: number;

@@ -235,6 +235,8 @@ export interface DirectiveContext {
   reason: string;
   successCondition?: string;
   source: string;
+  /** Bounded shared-mission context (mission coordination; background data). */
+  contextBlock?: string;
 }
 
 interface ExecutionStep {
@@ -335,6 +337,8 @@ export class AgentOrchestrator {
   private specialistObjectiveAnnounced: string | null = null;
   /** Settled objective ids by step id (attribution after the result emits). */
   private specialistResultOfStep = new Map<string, string>();
+  /** ObjectiveIds whose specialist-result event was already emitted (exactly-once, §6). */
+  private specialistResultsEmitted = new Set<string>();
 
   /** Explicit, configurable recovery budgets (tests + deployment tuning). */
   setRecoveryConfig(partial: Partial<RecoveryConfig>): void {
@@ -758,6 +762,15 @@ export class AgentOrchestrator {
       ...(opts.reason ? { reason: opts.reason } : {}),
     });
     if (!result) return null;
+    // Results are terminal and emitted EXACTLY once (§6): re-settling an
+    // already-terminal objective returns the SAME stored result from the
+    // ledger — re-emitting it would duplicate the event downstream.
+    if (this.specialistResultsEmitted.has(result.objectiveId)) return null;
+    this.specialistResultsEmitted.add(result.objectiveId);
+    if (this.specialistResultsEmitted.size > 100) {
+      const oldest = this.specialistResultsEmitted.values().next().value;
+      if (oldest) this.specialistResultsEmitted.delete(oldest);
+    }
     // Keep step → settled-objective attribution for later events.
     const objective = this.specialist.get(result.objectiveId);
     if (objective) {
@@ -1352,6 +1365,13 @@ export class AgentOrchestrator {
     ];
     if (directive.successCondition) {
       lines.push(`- Success condition (verify before reporting success): ${directive.successCondition}`);
+    }
+    if (directive.contextBlock) {
+      // Bounded shared-mission context (mission coordination): verified
+      // evidence from completed steps as BACKGROUND data. It is appended
+      // verbatim by the coordinator (already bounded) — the current
+      // instruction always outranks it.
+      lines.push(directive.contextBlock.trimStart());
     }
     this.directiveContext = `\n\n${lines.join('\n')}`;
   }
@@ -2334,6 +2354,7 @@ export class AgentOrchestrator {
     this.specialist.clear();
     this.specialistObjectiveAnnounced = null;
     this.specialistResultOfStep.clear();
+    this.specialistResultsEmitted.clear();
     this.session.clearHistory();
     // Clearing history also forgets all remembered approvals.
     this.grants.clearAll();

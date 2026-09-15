@@ -15,7 +15,7 @@
 // =============================================================
 
 import { TaskQueue, QueueTask } from './task-queue.js';
-import { MissionStore } from './missions.js';
+import { MissionStore, Mission } from './missions.js';
 import { logger } from './logger.js';
 
 export interface SchedulerOrchestratorLike {
@@ -32,6 +32,26 @@ export interface SchedulerDeps {
   missions: MissionStore;
   orchestrator: SchedulerOrchestratorLike;
   emit: (event: string, data: unknown) => void;
+  /**
+   * Mission-coordination hooks (all optional; absent = legacy behavior):
+   *  - expandStep: real {{evidence:stepId}} template expansion for a step
+   *    objective BEFORE it is enqueued (unresolvable → explicit marker);
+   *  - missionContext: bounded shared-mission context for the step about
+   *    to run (completed verified evidence + failed results);
+   *  - enrichMissions: attach real per-mission verification to the
+   *    mission-progress payload (HUD/JARVIS see honest state).
+   */
+  expandStep?: (text: string, missionId: string) => string;
+  missionContext?: (missionId: string, stepId: string) => string;
+  enrichMissions?: (missions: Mission[]) => Mission[];
+  /** Coordinator task binding (mission coordination; optional). */
+  bindCoordinatorTask?: (taskId: string | null) => void;
+  /**
+   * The step's REAL ingested verification level (mission coordination).
+   * Derived from the specialist-result event that arrived while the
+   * task was bound — undefined when no specialist evidence exists.
+   */
+  stepVerification?: (missionId: string, stepId: string) => 'VERIFIED' | 'PARTIAL' | 'UNVERIFIED' | undefined;
 }
 
 export class JarvisScheduler {
@@ -39,9 +59,16 @@ export class JarvisScheduler {
   private readonly missions: MissionStore;
   private readonly orchestrator: SchedulerOrchestratorLike;
   private readonly emit: (event: string, data: unknown) => void;
+  private readonly expandStep?: (text: string, missionId: string) => string;
+  private readonly missionContext?: (missionId: string, stepId: string) => string;
+  private readonly enrichMissions?: (missions: Mission[]) => Mission[];
 
   /** Queue task id currently being executed by the orchestrator. */
   private runningTaskId: string | null = null;
+  /** Coordinator task binding (mission coordination; optional). */
+  private readonly bindCoordinatorTask?: (taskId: string | null) => void;
+  /** Step verification lookup (mission coordination; optional). */
+  private readonly stepVerification?: (missionId: string, stepId: string) => 'VERIFIED' | 'PARTIAL' | 'UNVERIFIED' | undefined;
   /** Last real agent-state seen while a task was running. */
   private lastState: string = 'idle';
 
@@ -50,9 +77,17 @@ export class JarvisScheduler {
     this.missions = deps.missions;
     this.orchestrator = deps.orchestrator;
     this.emit = deps.emit;
+    this.expandStep = deps.expandStep;
+    this.missionContext = deps.missionContext;
+    this.enrichMissions = deps.enrichMissions;
+    this.bindCoordinatorTask = deps.bindCoordinatorTask;
+    this.stepVerification = deps.stepVerification;
 
     this.queue.onChange((tasks) => this.emit('queue-updated', { tasks }));
-    this.missions.onChange((missions) => this.emit('mission-progress', { missions }));
+    // Real per-mission verification (mission coordination) rides on the
+    // SAME event — one source of truth, no parallel event channel.
+    this.missions.onChange((missions) =>
+      this.emit('mission-progress', { missions: this.enrichMissions ? this.enrichMissions(missions) : missions }));
   }
 
   /** Feed a user request into the queue (the only entry point). */
@@ -79,6 +114,9 @@ export class JarvisScheduler {
     const id = this.runningTaskId;
     if (!id) return;
     this.runningTaskId = null;
+    // Unbind the coordinator BEFORE settling: events after this point no
+    // longer belong to the settled step (no stale attribution).
+    this.bindCoordinatorTask?.(null);
 
     const task = this.queue.get(id);
     if (!task) return;
@@ -109,9 +147,15 @@ export class JarvisScheduler {
     } else {
       this.queue.markCompleted(id, result);
       if (task.missionId && task.missionStepId) {
+        // The step's REAL verification level comes from the specialist
+        // evidence ingested while THIS task was bound (mission
+        // coordination). No evidence → UNVERIFIED — never upgraded.
+        const v = this.stepVerification?.(task.missionId, task.missionStepId);
+        const verification = v === 'VERIFIED' || v === 'PARTIAL' ? v : 'UNVERIFIED';
         this.missions.settleStep(task.missionId, task.missionStepId, {
           success: true,
           result,
+          verification,
         });
       }
     }
@@ -140,11 +184,28 @@ export class JarvisScheduler {
       const started = this.missions.startOrResume(mission.id);
       if (!started) continue;
       const { step } = started;
+      // Mission coordination (§ multi-specialist): the step objective is
+      // template-expanded from REAL step evidence (unresolvable references
+      // become explicit markers — never fabricated), and the bounded
+      // shared mission context rides with the task's directive so the
+      // executing specialist sees verified evidence as BACKGROUND data
+      // (the current instruction still outranks it).
+      const objective = this.expandStep ? this.expandStep(step.description, mission.id) : step.description;
+      const contextBlock = this.missionContext ? this.missionContext(mission.id, step.id) : undefined;
       this.queue.enqueue({
-        objective: step.description,
+        objective,
         priority: mission.priority,
         missionId: mission.id,
         missionStepId: step.id,
+        ...(contextBlock ? {
+          directive: {
+            id: `mission_${mission.id.slice(0, 12)}`,
+            complexity: 'standard',
+            reason: 'mission step execution',
+            source: 'mission',
+            contextBlock,
+          },
+        } : {}),
       });
     }
 
@@ -153,6 +214,10 @@ export class JarvisScheduler {
     if (!next) return;
     this.queue.markRunning(next.id);
     this.runningTaskId = next.id;
+    // Mission coordination: bind the running queue task so real specialist
+    // events attribute to the right mission step (serial execution = exact
+    // correlation). Unbound when the task settles.
+    this.bindCoordinatorTask?.(next.id);
     this.lastState = 'planning';
     this.emit('scheduler', { runningTaskId: next.id });
     logger.info('scheduler', `Running queue task ${next.id}: ${next.objective.slice(0, 80)}`);

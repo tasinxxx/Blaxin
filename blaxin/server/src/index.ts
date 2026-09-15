@@ -49,6 +49,7 @@ import { DeploymentEngine } from './cloud/deployment.js';
 import { createInfrastructureRouter } from './api/infrastructure.js';
 import { TaskQueue } from './utils/task-queue.js';
 import { MissionStore } from './utils/missions.js';
+import { MissionCoordinator } from './orchestrator/mission-coordinator.js';
 import { securityLog } from './utils/security-log.js';
 import { missionJournal } from './utils/mission-journal.js';
 import { JarvisScheduler } from './utils/scheduler.js';
@@ -89,6 +90,13 @@ function onAgentEvent(listener: AgentEventListener): void {
 const queue = new TaskQueue();
 const missions = new MissionStore();
 
+// ── Mission coordination (§ multi-specialist coordination) ────
+// Binds real specialist objectives to mission steps, aggregates honest
+// verification, and shares bounded verified context with later steps.
+// No new execution path: specialists still run through queue →
+// scheduler → orchestrator with all policy gates intact.
+const missionCoordinator = new MissionCoordinator(missions, queue);
+
 // ── Agency registry (REAL worker visibility) ─────────────────
 // Tracks role activations of the EXISTING agent: every real tool
 // execution becomes a worker keyed by its real step id. Lifecycle is
@@ -127,6 +135,20 @@ const scheduler = new JarvisScheduler({
   missions,
   orchestrator,
   emit: emitAll,
+  // Mission coordination hooks: template expansion + bounded shared
+  // context for each step, and honest verification on mission events.
+  bindCoordinatorTask: (taskId) => missionCoordinator.bindRunningTask(taskId),
+  stepVerification: (missionId, stepId) => missionCoordinator.stepVerification(missionId, stepId),
+  expandStep: (text, missionId) => missionCoordinator.expandTemplate(text, missionId),
+  missionContext: (missionId, stepId) =>
+    missionCoordinator.renderContext(missionCoordinator.contextFor(missionId, stepId)),
+  enrichMissions: (list) => list.map((m) => {
+    const v = missionCoordinator.snapshot(m.id).verification;
+    return {
+      ...m,
+      verification: v === 'VERIFIED' || v === 'PARTIAL' || v === 'UNVERIFIED' ? v : undefined,
+    };
+  }),
 });
 
 // ── JARVIS — the user-facing executive layer ──────────────
@@ -797,6 +819,7 @@ app.post('/api/missions/:id/retry', (req, res) => {
 
 app.delete('/api/missions/:id', (req, res) => {
   res.json({ success: missions.remove(req.params.id) });
+  missionCoordinator.forget(req.params.id);
 });
 
 app.get('/api/jarvis/state', (_req, res) => {
@@ -1007,6 +1030,13 @@ orchestrator.setEventCallback((event, data) => {
   if (!isExternalMode()) scheduler.onOrchestratorEvent(event, data);
 });
 
+// Mission coordination intake: real specialist events bind objectives to
+// mission steps and record each step's honest verification evidence.
+onAgentEvent((event, data) => {
+  if (event === 'specialist-assigned') missionCoordinator.onSpecialistAssigned(data);
+  else if (event === 'specialist-result') missionCoordinator.onSpecialistResult(data);
+});
+
 securityLog.onChange((events) => broadcast('security-events', { events }));
 
 // Browser-session lifecycle is REAL state (§22/§23): desyncs and losses
@@ -1112,6 +1142,9 @@ wss.on('connection', (ws) => {
           scheduler.pump();
           break;
         case 'mission-cancel':
+          // Mission coordination: cancelling the mission cancels its
+          // queued/running queue tasks too — no orphan specialists.
+          missionCoordinator.cancelMission(String(msg.data?.id ?? ''));
           missions.cancel(msg.data?.id);
           break;
         case 'mission-retry':
@@ -1119,6 +1152,7 @@ wss.on('connection', (ws) => {
           scheduler.pump();
           break;
         case 'mission-delete':
+          missionCoordinator.forget(String(msg.data?.id ?? ''));
           missions.remove(msg.data?.id);
           break;
         case 'stop':

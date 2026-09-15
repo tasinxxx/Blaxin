@@ -36,6 +36,11 @@ export interface MissionStep {
     completedAt: number;
     summary: string;
   };
+  /**
+   * The step's REAL verification level (mission coordination), carried
+   * from the specialist result that executed it. Absent = no evidence.
+   */
+  verification?: 'VERIFIED' | 'PARTIAL' | 'UNVERIFIED';
   /** Queue task id that executed this step (filled when enqueued). */
   taskId?: string;
 }
@@ -58,6 +63,13 @@ export interface Mission {
   history: string[];
   /** Bounded error log. */
   errors: string[];
+  /**
+   * Honest mission-level verification (mission coordination): derived
+   * ONLY from real specialist evidence ingested per step — VERIFIED
+   * requires every completed step to carry real verification evidence.
+   * Absent/undefined = no evidence ingested yet (honest NONE).
+   */
+  verification?: 'VERIFIED' | 'PARTIAL' | 'UNVERIFIED';
 }
 
 export interface MissionOptions {
@@ -240,22 +252,27 @@ export class MissionStore {
   /**
    * Record a checkpoint for a step. `success: true` marks the step
    * completed and advances; `false` marks it failed (retryable).
+   * `verification` attaches the step's REAL verification level (mission
+   * coordination); undefined keeps the existing mission-level value.
    */
   settleStep(
     id: string,
     stepId: string,
-    outcome: { success: boolean; result?: string; error?: string },
+    outcome: { success: boolean; result?: string; error?: string; verification?: 'VERIFIED' | 'PARTIAL' | 'UNVERIFIED' },
   ): void {
     this.load();
     const m = this.missions.find((x) => x.id === id);
     if (!m) return;
     const step = m.steps.find((s) => s.id === stepId);
     if (!step) return;
-
     if (outcome.success) {
       step.status = 'completed';
       step.result = (outcome.result || '').slice(0, 2000);
       step.endedAt = Date.now();
+      // Mission coordination: the step's REAL verification level is stored
+      // ON the step — the mission-level aggregation below reads exactly
+      // this field, so an ingested level must never be dropped here.
+      if (outcome.verification) step.verification = outcome.verification;
       step.checkpoint = {
         completedAt: Date.now(),
         summary: (outcome.result || step.description).slice(0, 500),
@@ -270,13 +287,27 @@ export class MissionStore {
 
     this.recomputeProgress(m);
 
+    // Mission-level verification (mission coordination): recomputed from
+    // the per-step REAL verification levels at every step settlement.
+    // UNVERIFIED stays UNVERIFIED — never upgraded.
+    const completedSteps = m.steps.filter((s) => s.status === 'completed');
+    if (completedSteps.length === 0) {
+      delete m.verification;
+    } else if (completedSteps.every((s) => s.verification === 'VERIFIED')) {
+      m.verification = 'VERIFIED';
+    } else if (completedSteps.some((s) => s.verification === 'VERIFIED' || s.verification === 'PARTIAL')) {
+      m.verification = 'PARTIAL';
+    } else {
+      m.verification = 'UNVERIFIED';
+    }
+
     // Completion check.
     const remaining = m.steps.filter((s) => s.status === 'pending' || s.status === 'running');
     if (remaining.length === 0) {
       const failed = m.steps.some((s) => s.status === 'failed');
       m.status = failed ? 'failed' : 'completed';
       if (m.status === 'completed') m.completedAt = Date.now();
-      this.log(m, `Mission ${m.status}`);
+      this.log(m, `Mission ${m.status}${m.verification ? ` — verification ${m.verification}` : ''}`);
     }
     this.changed();
   }
