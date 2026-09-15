@@ -147,8 +147,33 @@ export class FileSystemTool implements Tool {
           if (!existsSync(dir)) {
             mkdirSync(dir, { recursive: true });
           }
-          writeFileSync(filePath, args.content as string || '');
-          return { success: true, output: `File written: ${filePath}` };
+          const content = args.content as string || '';
+          writeFileSync(filePath, content);
+          // Verification-in-depth (§27/§28): "writeFileSync returned" is not
+          // "the file holds what we wrote". Read the file BACK and compare —
+          // a failed/partial write is an honest FAILURE, never a claim.
+          let readBack: string;
+          try {
+            readBack = readFileSync(filePath, 'utf-8');
+          } catch (e: any) {
+            return {
+              success: false, output: '',
+              error: `write NOT verified — the file could not be read back: ${e?.message ?? e}`,
+              data: { verification: { status: 'UNKNOWN', method: 'write-readback', evidence: null, confidence: 0, detail: 'read-back failed' } },
+            };
+          }
+          if (readBack !== content) {
+            return {
+              success: false, output: '',
+              error: `write NOT verified — read-back mismatch (wrote ${content.length} chars, read ${readBack.length} chars)`,
+              data: { verification: { status: 'FAILURE', method: 'write-readback', evidence: { wrote: content.length, read: readBack.length }, confidence: 0.9, detail: 'file content does not match what was written' } },
+            };
+          }
+          return {
+            success: true,
+            output: `File written and verified: ${filePath} (${content.length} chars, read-back match).`,
+            data: { verification: { status: 'SUCCESS', method: 'write-readback', evidence: { path: filePath, chars: content.length }, confidence: 0.95, detail: 'file content verified by read-back compare' } },
+          };
         }
 
         case 'create_dir': {
