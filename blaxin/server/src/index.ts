@@ -22,6 +22,20 @@ import { memoryLayers } from './memory/layers.js';
 // the wiring explicit and survives future dependency-injection changes.
 orchestrator.setMemoryRuntime(memoryLayers);
 
+// Wire the user's persisted budget configuration into the orchestrator
+// (§6 specialist ownership + § recovery ladder): the code defaults stay
+// authoritative for anything the config file does not specify. Applied
+// once at startup; saveConfig (PUT /api/config) invalidates the config
+// cache so a restart picks edits up — live retuning stays possible via
+// the explicit setters below.
+{
+  const bootConfig = loadConfig();
+  // loadConfig back-fills both subsections per-key; `?? {}` keeps the
+  // code defaults if an older build ever produces a config without them.
+  orchestrator.setSpecialistConfig(bootConfig.agent.specialist ?? {});
+  orchestrator.setRecoveryConfig(bootConfig.agent.recovery ?? {});
+}
+
 // Wire the REAL layered-memory runtime into the orchestrator (§20+):
 // run outcomes (episodes/failures/verified environment observations)
 // persist, and the advisor reads task-relevant slices back per task.

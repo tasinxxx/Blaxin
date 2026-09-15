@@ -25,6 +25,25 @@ const defaultConfig: AppConfig = {
     requireConfirmation: true,
     enableFastPath: true,
     enableParallelTools: true,
+    // Specialist bounded-objective budgets (§6): how far a delegated
+    // specialist may go on its own (actions, recoveries, re-plans, wall
+    // clock) before it must settle honestly. Defaults mirror the ledger's
+    // DEFAULT_SPECIALIST_CONFIG.
+    specialist: {
+      maxActions: 16,
+      maxRecoveries: 8,
+      maxReplans: 1,
+      deadlineMs: 300_000,
+    },
+    // Deterministic recovery ladder budgets (§ recovery): attempts per
+    // action, re-plans per task, backoff bounds. Defaults mirror
+    // DEFAULT_RECOVERY_CONFIG.
+    recovery: {
+      maxRecoveryAttempts: 2,
+      maxReplansPerTask: 1,
+      baseBackoffMs: 300,
+      maxBackoffMs: 2000,
+    },
     confirmationPatterns: [
       'delete',
       'remove',
@@ -67,7 +86,15 @@ export function loadConfig(): AppConfig {
         ...defaultConfig,
         ...stored,
         server: { ...defaultConfig.server, ...(stored.server || {}) },
-        agent: { ...defaultConfig.agent, ...(stored.agent || {}) },
+        agent: {
+          ...defaultConfig.agent,
+          ...(stored.agent || {}),
+          // Budget subsections back-fill per-key so an older config file
+          // (or a partial edit) can never silently drop a budget to
+          // undefined — the honest defaults stay in force.
+          specialist: { ...defaultConfig.agent.specialist, ...(stored.agent?.specialist || {}) },
+          recovery: { ...defaultConfig.agent.recovery, ...(stored.agent?.recovery || {}) },
+        },
         tools: { ...defaultConfig.tools, ...(stored.tools || {}) },
         appearance: { ...defaultConfig.appearance, ...(stored.appearance || {}) },
       };

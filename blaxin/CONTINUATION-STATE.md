@@ -1,23 +1,61 @@
 # BLAXIN Engineering Mission — Continuation State
 
 MISSION PHASE: A — finish the current running update (Phase B = Stonic parity → 10× → release, GATED behind Phase A lock)
-CURRENT OBJECTIVE: Mission coordination (§ multi-specialist) — verified end to end
-CURRENT SUBTASK: Part 16 verification complete; commit + push next
+CURRENT OBJECTIVE: Phase A completion audit against the §-checklist
+CURRENT SUBTASK: config-surface wiring DONE (Part 17); §-audit next
 CURRENT STATUS: All gates green (tests, typecheck, build, E2E, live real-Chrome proof)
-COMPLETED: MissionCoordinator implementation + honest verification aggregation + template expansion + shared context + cancellation propagation; filesystem write read-back verification; live VERIFIED browser-specialist proof (probe 14/14); dedicated deterministic suites for both (35 tests)
-VERIFIED: server tsc clean; FULL suite 772 passed / 12 skipped / 0 failed (one documented brain-integration load flake in an earlier run passes 7/7 in isolation — the final run is fully green); client tsc -b + vite build clean; E2E 8/8 (19.0s); real-Chrome probe 14/14 PASS (COMPLETED_VERIFIED from real observed title via url-match)
-IN PROGRESS: nothing else in flight — commit next
+COMPLETED: Mission coordination verified end to end (Part 16); filesystem write read-back verification; live VERIFIED browser-specialist proof; specialist/recovery budgets now user-configurable via persisted config (agent.specialist + agent.recovery, per-key back-fill, applied to the orchestrator at startup)
+VERIFIED: server tsc clean; FULL suite 779 passed / 12 skipped / 0 failed; client tsc -b + vite build clean; E2E 8/8 (19.0s); real-Chrome probe 14/14 PASS after ALL changes
+IN PROGRESS: nothing in flight — Phase A §-completion audit next
 BLOCKED: voice physical output + live-LLM round trips remain environment-blocked (no provider key / no verifiable audio sink) — unchanged
 KNOWN FAILURES: none open
 KNOWN LIMITATIONS: mission verification derives from MissionStore (single source of truth) — the coordinator's live evidence map feeds settleStep and provides context/template detail, NOT a second aggregation; missions completed before coordination existed read UNVERIFIED (honest — absence of evidence is never upgraded)
-FILES CHANGED (Part 16): NEW server/src/orchestrator/mission-coordinator.ts · NEW server/src/__tests__/orchestrator/mission-coordinator.test.ts (27) · NEW server/src/__tests__/tools/filesystem-write.test.ts (8) · NEW client/src/components/hud/MissionPanel.tsx · NEW server/scripts/probe-browser-specialist.mjs · NEW server/src/__tests__/orchestrator/browser-specialist.test.ts (14) · MODIFIED server/src/{index.ts,jarvis/engine.ts,jarvis/types.ts,orchestrator/index.ts,tools/filesystem.ts,utils/missions.ts,utils/scheduler.ts,utils/task-queue.ts} · MODIFIED client/src/{components/hud/HudView.tsx,theme/jarvis.css,utils/store.ts}
-TESTS: mission-coordinator 27/27 · filesystem-write 8/8 · browser-specialist 14/14 · FULL 772/12/0 · E2E 8/8 · probe 14/14
-RUNTIME VERIFICATION: real server + real WS + real Chrome (loopback target): policy approval → CDP navigation → real url-match verification (observed title) → COMPLETED_VERIFIED → journal DELEGATED→ACTION→OBSERVATION→VERIFICATION→RESULT — probe exit 0
-COMMITS: a276451 (Part 15) + this session's commit (next)
+FILES CHANGED (Part 17): MODIFIED server/src/{types.ts,utils/config.ts,index.ts} · NEW server/src/__tests__/budget-config.test.ts (7)
+TESTS: budget-config 7/7 · FULL 779/12/0 · E2E 8/8 · probe 14/14
+RUNTIME VERIFICATION: real-Chrome probe re-run after ALL Part-17 changes: 14/14 PASS, exit 0
+COMMITS: a276451 (Part 15) · 321d744 + dcad670 + 04b0bef (Part 16) · this session's commit (next)
 CURRENT VERSION: 1.4.0 (UNTAGGED — tag still deferred)
-NEXT EXACT ACTION: (1) commit Part 16 as two coherent commits (mission coordination; filesystem write verification + tests) and push; (2) NEXT IMPLEMENTATION TARGET: wire specialist budgets into the config surface (defaults are code constants; setSpecialistConfig exists for tests/ops); (3) then Phase A completion audit against the §-checklist before any v1.4.0 tag
-RELEASE BLOCKERS: v1.4.0 tag deferred until the agreed scope (config surface + final §-audit) is verified
+NEXT EXACT ACTION: (1) commit Part 17 (budget config surface) and push; (2) run the Phase A §-completion audit (implementation/tests/UI/backend/specialist system/missions/browser-control/verification/recovery/memory/packaging/docs/branding/release readiness) and record the honest per-§ table; (3) resolve audit findings, then v1.4.0 tag decision
+RELEASE BLOCKERS: v1.4.0 tag deferred until the Phase A §-audit is complete and its findings resolved
 FINAL RELEASE STATUS: NOT STARTED (Phase B)
+
+---
+
+## SESSION — BUDGET CONFIG SURFACE (2026-09-15, PART 17)
+
+Continued straight on from Part 16 (clean tree at 04b0bef). Closed the
+continuation state's NEXT TARGET #2: specialist/recovery budgets are now
+USER-CONFIGURABLE through the persisted AppConfig instead of living only
+as code constants + test-only setters.
+
+### What changed
+- `types.ts`: `agent.specialist` {maxActions,maxRecoveries,maxReplans,
+  deadlineMs} and `agent.recovery` {maxRecoveryAttempts,maxReplansPerTask,
+  baseBackoffMs,maxBackoffMs} — optional subsections for backward
+  compatibility with pre-existing config files.
+- `utils/config.ts`: honest defaults (mirroring DEFAULT_SPECIALIST_CONFIG
+  and DEFAULT_RECOVERY_CONFIG) + PER-KEY back-fill on load — an older
+  config file or a partial edit can never silently drop a budget to
+  undefined (the same deep-merge rule the file already applied to
+  server/agent/tools/appearance). Non-object subsections degrade to
+  defaults (never a crash).
+- `index.ts`: at startup, `loadConfig()` →
+  `orchestrator.setSpecialistConfig(...)` + `setRecoveryConfig(...)`
+  (with `?? {}` so the code defaults win if a subsection is absent).
+  PUT /api/config already invalidates the config cache; a restart picks
+  edits up. No new execution path, no live-mutation race (setters are
+  the same ones the test suites already pin).
+- NEW `__tests__/budget-config.test.ts` (7): defaults with no file,
+  older-config back-fill (user values KEPT + budgets defaulted), partial
+  subsection back-fill, save/load round-trip, saveConfig cache
+  invalidation seen by the hot-path getConfig(), corrupt-file degradation,
+  non-object subsection degradation.
+
+### Verification this phase (evidence, no claims)
+- Server `tsc --noEmit` clean; FULL suite **779 passed / 12 skipped /
+  0 failed** (772 → 779).
+- Client `tsc -b` clean; E2E **8/8 PASS** (19.0s).
+- Real-Chrome specialist probe re-run after ALL changes: **14/14 PASS**.
 
 ---
 

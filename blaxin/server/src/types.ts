@@ -196,6 +196,29 @@ export interface AppConfig {
     enableFastPath: boolean;
     /** Execute independent tool calls from one model response concurrently. */
     enableParallelTools: boolean;
+    /**
+     * Specialist bounded-objective budgets (§6). Optional for backward
+     * compatibility with pre-existing config files; loadConfig() back-fills
+     * the code defaults so getConfig() consumers always see values.
+     */
+    specialist?: {
+      maxActions: number;
+      maxRecoveries: number;
+      maxReplans: number;
+      deadlineMs: number;
+    };
+    /**
+     * Deterministic recovery budgets (§ recovery ladder). Optional; loaded
+     * defaults back-fill. NOTE: agent.recovery.maxReplansPerTask is the
+     * authoritative per-task re-plan budget (it overrides the specialist's
+     * own at assignment, mirroring the recovery ladder's contract).
+     */
+    recovery?: {
+      maxRecoveryAttempts: number;
+      maxReplansPerTask: number;
+      baseBackoffMs: number;
+      maxBackoffMs: number;
+    };
   };
   tools: Record<string, boolean>;
   appearance: {
