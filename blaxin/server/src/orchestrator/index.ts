@@ -1,7 +1,7 @@
 import { v4 as uuidv4 } from 'uuid';
 import {
   ChatMessage, AgentState, AgentTask, TaskStep, AIResponse, ToolCall,
-  ProviderId, AppConfig, ToolResult, Tool, ToolDefinition,
+  ProviderId, AppConfig, ToolResult, Tool, ToolDefinition, ModelInfo,
   RiskTier, PermissionScope, GrantScope,
 } from '../types.js';
 import { providers, AIProvider, ProviderError } from '../providers/index.js';
@@ -14,6 +14,9 @@ import { memoryStore, MemoryType, MemoryEntry, formatMemoryContext, looksSensiti
 import { memoryAdvisor, MemoryAdvisory, MemorySelection } from '../memory/advisor.js';
 import { memoryLayers, EnvironmentInput, FailureInput, EpisodeInput, ProcedureInput } from '../memory/layers.js';
 import { classifyDirect, DirectAction } from '../router/direct.js';
+import {
+  ModelReliability, RequiredCapabilities, RoutingDecision, route as routeDecision,
+} from '../router/model-router.js';
 import {
   budgetToolResultOutput, budgetAssistantMessage, budgetToolResultImages,
 } from '../utils/context-budget.js';
@@ -79,6 +82,12 @@ export interface ProviderRegistryLike {
   getProvider(id: ProviderId): AIProvider;
   getFallbackProvider(failedProviderId: ProviderId): AIProvider | null;
   getFallbackModel(providerId: ProviderId): string | null;
+  /**
+   * Models REALLY available right now across usable providers (10×
+   * adaptive routing). Optional for backward compatibility with existing
+   * test fakes: when absent the router degrades to active-model-only.
+   */
+  getAvailableModels?(): Promise<ModelInfo[]>;
 }
 
 export interface ToolRegistryLike {
@@ -118,6 +127,24 @@ export interface MemoryStoreLike {
    */
   advise?(objective: string, opts?: { budgetChars?: number }): MemoryAdvisory;
 }
+
+/** Injectable routing dependencies (tests; defaults use the provider registry). */
+export interface RoutingDependencies {
+  /** Availability snapshot override (tests). */
+  getAvailableModels?(): Promise<ModelInfo[]>;
+}
+
+function requiredOf(r: RequiredCapabilities): string[] {
+  const caps: string[] = ['chat'];
+  if (r.toolCalling) caps.push('tool-calling');
+  if (r.vision) caps.push('vision');
+  if (r.local) caps.push('local');
+  return caps;
+}
+
+/** Requests that genuinely ask the agent to OBSERVE the screen. */
+const SCREEN_ASK_RE =
+  /(screenshot|my screen|the screen|screen and|look at (my |the )?(screen|desktop|display)|what('?s| is) on (my |the )?(screen|desktop)|see (my |the )?screen|read the screen)/i;
 
 export interface OrchestratorDeps {
   providers: ProviderRegistryLike;
@@ -328,6 +355,11 @@ export class AgentOrchestrator {
   private recoveryConfig: RecoveryConfig = { ...DEFAULT_RECOVERY_CONFIG };
   private replansUsedThisTask = 0;
 
+  // Adaptive model routing (10×): capability-aware selection with a
+  // bounded outcome history as a routing signal. Injectable for tests.
+  private modelReliability = new ModelReliability();
+  private routingDeps: RoutingDependencies = {};
+
   // Specialist bounded-objective ownership (§6): the tool that actually
   // activates first claims the task's objective under explicit budgets.
   // Every important action stays attributable via the objectiveId; the
@@ -344,6 +376,14 @@ export class AgentOrchestrator {
   setRecoveryConfig(partial: Partial<RecoveryConfig>): void {
     this.recoveryConfig = { ...this.recoveryConfig, ...partial };
   }
+
+  /** Explicit, injectable routing dependencies (tests; defaults to singletons). */
+  setRoutingDependencies(routing: Partial<RoutingDependencies> | null): void {
+    this.routingDeps = routing ?? {};
+  }
+
+  /** Bounded per-(provider, model) outcome history used as a routing signal. */
+  getRoutingReliability(): ModelReliability { return this.modelReliability; }
 
   /** Explicit, configurable specialist budgets (tests + deployment tuning). */
   setSpecialistConfig(partial: Partial<SpecialistConfig>): void {
@@ -624,19 +664,53 @@ export class AgentOrchestrator {
     // A rolled-back direct attempt must not mislabel this LLM run.
     if (this.runMetrics) this.runMetrics.kind = 'llm';
 
-    const providerId = this.providers.getActiveProvider();
-    const modelId = this.providers.getActiveModel();
-
-    if (!providerId || !modelId) {
+    // Adaptive model routing (10×): derive what this task REQUIRES from
+    // real evidence, match it against the models REALLY available, and
+    // route honestly — including an honest BLOCK when nothing satisfies
+    // the requirement. Falls back to the active model unchanged when no
+    // routing source exists (backward compatible with existing fakes).
+    const routingStart = Date.now();
+    const routeStart = Date.now();
+    const required = this.requiredCapabilitiesFor(userMessage);
+    const routing = await this.routeModel(required, userMessage);
+    const routingLatency = Date.now() - routeStart;
+    if (routing.blocked) {
+      // The task cannot be honestly served: report the REAL missing
+      // capability / missing provider. Never silently downgrade.
+      this.emit('model-routing', {
+        taskId: this.currentTask?.id,
+        objective: userMessage,
+        required: routing.required,
+        candidates: routing.candidates,
+        rejected: routing.rejected,
+        blocked: true,
+        detail: routing.blockDetail,
+        missingCapability: routing.missingCapability,
+        latencyMs: routingLatency,
+      });
       this.emit('error', {
-        message: 'No AI provider or model configured. Please configure a provider in Settings.',
+        message: routing.blockDetail,
         code: 'NO_PROVIDER',
       });
       if (this.runMetrics) this.runMetrics.outcome = 'no-provider';
-      // Still close the run so the failed attempt is visible in metrics.
       this.finishRunTask();
       return;
     }
+    this.emit('model-routing', {
+      taskId: this.currentTask?.id,
+      objective: userMessage,
+      required: routing.required,
+      candidates: routing.candidates,
+      rejected: routing.rejected,
+      selectedProvider: routing.providerId,
+      selected: routing.modelId,
+      selectionReason: routing.reason,
+      latencyMs: routingLatency,
+    });
+    void routingStart;
+
+    const providerId = routing.providerId;
+    const modelId = routing.modelId;
 
     const provider = this.providers.getProvider(providerId);
     if (!provider.hasApiKey() && provider.apiKeyRequired) {
@@ -723,7 +797,12 @@ export class AgentOrchestrator {
     }
 
     try {
-      await this.executeLoop(provider, modelId, config.agent.maxSteps, providerId);
+      await this.executeLoop(provider, modelId, config.agent.maxSteps, providerId, {
+        required,
+        reliability: this.modelReliability,
+        emitRouting: (payload) => this.emit('model-routing', payload),
+        getAvailable: () => this.routingAvailable(),
+      });
     } catch (error: any) {
       logger.error('orchestrator', 'Agent loop failed', error);
       this.emit('error', {
@@ -745,6 +824,141 @@ export class AgentOrchestrator {
     // Mark the real timeout on the objective itself (honest evidence).
     o.deadlineExceeded = true;
     return true;
+  }
+
+  // ── Adaptive model routing (10×) ────────────────────────────
+
+  /**
+   * Derive what THIS task REQUIRES from the model — from real evidence
+   * only: the images actually carried on the messages, the tools the
+   * registry actually exposes, the user's actual wording. Never guessed
+   * from the model name or niceness.
+   */
+  private requiredCapabilitiesFor(userMessage: string): RequiredCapabilities {
+    const required: RequiredCapabilities = {
+      chat: true,
+      toolCalling: this.toolRegistry.getToolDefinitions().length > 0,
+      // Real evidence (1): a verified screenshot is still in the replay
+      // window — the model must SEE it.
+      // Real evidence (2): the request itself asks to observe the screen.
+      vision:
+        this.conversationHistory.some((m) => Array.isArray(m.images) && m.images.length > 0) ||
+        SCREEN_ASK_RE.test(userMessage),
+      local: /\b(offline|locally|on[- ]device|without (the )?internet|no internet)\b/i.test(userMessage),
+    };
+    return required;
+  }
+
+  /**
+   * REAL availability snapshot: models from providers that are actually
+   * usable right now. Injectable for tests (setRoutingDependencies).
+   */
+  private async routingAvailable(): Promise<ModelInfo[]> {
+    const custom = this.routingDeps.getAvailableModels;
+    if (custom) return custom();
+    const registry = this.providers as ProviderRegistryLike;
+    if (typeof registry.getAvailableModels === 'function') {
+      return registry.getAvailableModels();
+    }
+    return [];
+  }
+
+  /**
+   * The routing decision for this task. Deterministic fallbacks, in
+   * order: (1) routing candidates from the real availability snapshot;
+   * (2) the active provider/model unchanged (legacy path, unchanged
+   * behavior — also the path when no availability source exists).
+   * Returns blocked=true with the honest reason when nothing satisfies
+   * the requirements.
+   */
+  private async routeModel(
+    required: RequiredCapabilities,
+    userMessage: string,
+    opts: { ignoreActiveModel?: boolean } = {},
+  ): Promise<
+    | { blocked: true; blockDetail: string; missingCapability?: string; required: string[]; candidates: string[]; rejected: RoutingDecision['rejected'] }
+    | { blocked: false; providerId: ProviderId; modelId: string; reason: string; required: string[]; candidates: string[]; rejected: RoutingDecision['rejected'] }
+  > {
+    const activeProvider = this.providers.getActiveProvider();
+    const activeModel = this.providers.getActiveModel();
+    const available = await this.routingAvailable();
+    const usableProviders = new Set<ProviderId>();
+    for (const m of available) usableProviders.add(m.provider);
+
+    if (available.length === 0) {
+      // No availability source (test fakes) or every provider empty:
+      // legacy behavior — the active model is the route, unchanged.
+      if (activeProvider && activeModel) {
+        return {
+          blocked: false,
+          providerId: activeProvider,
+          modelId: activeModel,
+          reason: 'active configured model (no availability data — legacy direct selection)',
+          required: requiredOf(required),
+          candidates: [],
+          rejected: [],
+        };
+      }
+      return {
+        blocked: true,
+        blockDetail: 'No AI provider or model configured. Please configure a provider in Settings.',
+        required: requiredOf(required),
+        candidates: [],
+        rejected: [],
+      };
+    }
+
+    const decision = routeDecision({
+      required,
+      available,
+      availableProviders: [...usableProviders],
+      // After a failed call the re-route must not resurrect the model
+      // that just failed: it loses its active preference and is demoted
+      // by the (real) failure record.
+      activeProvider: opts.ignoreActiveModel ? null : activeProvider,
+      activeModel: opts.ignoreActiveModel ? null : activeModel,
+      reliability: this.modelReliability,
+    });
+
+    if (decision.selection.kind === 'selected') {
+      const s = decision.selection;
+      return {
+        blocked: false,
+        providerId: s.provider,
+        modelId: s.model,
+        reason: s.reason,
+        required: requiredOf(required),
+        candidates: decision.candidates.map((c) => `${c.provider}/${c.model}`),
+        rejected: decision.rejected,
+      };
+    }
+
+    // Honest BLOCK: name the real missing thing. Never downgrade.
+    const b = decision.selection.block;
+    const detail = b.reason === 'capability-unavailable'
+      ? `${b.detail}. Configure a capable provider or adjust the task.`
+      : b.detail;
+    return {
+      blocked: true,
+      blockDetail: detail,
+      missingCapability: b.capability,
+      required: requiredOf(required),
+      candidates: decision.candidates.map((c) => `${c.provider}/${c.model}`),
+      rejected: decision.rejected,
+    };
+  }
+
+  /** Record the REAL outcome of a model call into bounded history. */
+  private recordRoutingOutcome(
+    providerId: ProviderId,
+    modelId: string,
+    outcome: 'success' | 'failure' | 'timeout' | 'capability-mismatch',
+  ): void {
+    try {
+      this.modelReliability.record({ provider: providerId, model: modelId }, outcome);
+    } catch (e) {
+      logger.warn('orchestrator', `Routing outcome recording failed: ${(e as Error).message}`);
+    }
   }
 
   /**
@@ -1173,6 +1387,12 @@ export class AgentOrchestrator {
     modelId: string,
     maxSteps: number,
     providerId?: ProviderId,
+    routing?: {
+      required: RequiredCapabilities;
+      reliability: ModelReliability;
+      emitRouting: (payload: any) => void;
+      getAvailable: () => Promise<ModelInfo[]>;
+    },
   ): Promise<void> {
     while (this.stepCount < maxSteps && !this.stopRequested && !this.loopAbortReason) {
       // Specialist deadline (§6): a delegated objective expires on the
@@ -1206,6 +1426,9 @@ export class AgentOrchestrator {
         if (this.runMetrics) {
           this.runMetrics.modelCalls++;
           this.runMetrics.modelMs += Date.now() - modelStart;
+        }
+        if (routing) {
+          routing.reliability.record({ provider: (providerId || provider.id) as ProviderId, model: modelId }, 'success');
         }
 
         // Reset consecutive errors on successful response
@@ -1293,27 +1516,59 @@ export class AgentOrchestrator {
 
           // Wait before retrying on rate limit
           if (error.code === 'RATE_LIMIT') {
+            if (routing) routing.reliability.record({ provider: (providerId || provider.id) as ProviderId, model: modelId }, 'failure');
             await this.sleep(5000);
           } else if (error.code === 'NETWORK_ERROR' || error.code === 'SERVER_ERROR' || error.code === 'TIMEOUT') {
-            // Try fallback provider
-            const fallback = this.providers.getFallbackProvider(providerId!);
-            if (fallback && fallback.hasApiKey()) {
-              logger.warn('orchestrator', `Falling back from ${providerId} to ${fallback.id}`);
-              this.emit('activity', { type: 'thinking', content: `Switching to ${fallback.name} due to connection issues...` });
-              provider = fallback;
-              providerId = fallback.id;
+            if (routing) routing.reliability.record({ provider: (providerId || provider.id) as ProviderId, model: modelId }, 'timeout');
+            // Capability-aware bounded fallback (10×): re-route against
+            // the SAME requirements within the bounded candidate set.
+            const rtg = routing;
+            const escalated = rtg
+              ? await this.routeModel(rtg.required, '', { ignoreActiveModel: true })
+              : null;
+            const fbProvider = rtg && escalated && !escalated.blocked && escalated.candidates.length > 0
+              ? escalated
+              : null;
+            const fallbackModel2 = fbProvider?.modelId;
+            const legacyFallback = this.providers.getFallbackProvider(providerId!);
+            if (rtg && fbProvider && (fallbackModel2 !== modelId || (legacyFallback && legacyFallback.id !== (providerId || provider.id)))) {
+              const fb = fbProvider;
+              logger.warn('orchestrator', `Falling back from ${providerId}/${modelId} to ${fb.providerId}/${fb.modelId}`);
+              this.emit('activity', { type: 'thinking', content: `Switching to ${fb.modelId} due to connection issues...` });
+              rtg.emitRouting({
+                taskId: this.currentTask?.id,
+                objective: this.currentTask?.instruction ?? '',
+                required: fb.required,
+                candidates: fb.candidates,
+                rejected: fb.rejected,
+                selectedProvider: fb.providerId,
+                selected: fb.modelId,
+                selectionReason: fb.reason,
+                fallback: `bounded fallback after ${providerId}/${modelId} (${error.code})`,
+                latencyMs: 0,
+              });
+              provider = this.providers.getProvider(fb.providerId);
+              providerId = fb.providerId;
+              modelId = fb.modelId;
+              await this.sleep(1000);
+            } else if (legacyFallback && legacyFallback.hasApiKey()) {
+              logger.warn('orchestrator', `Falling back from ${providerId} to ${legacyFallback.id}`);
+              this.emit('activity', { type: 'thinking', content: `Switching to ${legacyFallback.name} due to connection issues...` });
+              provider = legacyFallback;
+              providerId = legacyFallback.id;
               // The fallback provider may not offer the active model —
               // pick one it actually has (see getFallbackModel).
-              const fallbackModel = this.providers.getFallbackModel(fallback.id);
+              const fallbackModel = this.providers.getFallbackModel(legacyFallback.id);
               if (fallbackModel) {
                 modelId = fallbackModel;
-                logger.info('orchestrator', `Fallback model for ${fallback.id}: ${fallbackModel}`);
+                logger.info('orchestrator', `Fallback model for ${legacyFallback.id}: ${fallbackModel}`);
               }
               await this.sleep(1000);
             } else {
               await this.sleep(2000);
             }
           } else {
+            if (routing) routing.reliability.record({ provider: (providerId || provider.id) as ProviderId, model: modelId }, 'failure');
             this.setState('error', error.message);
             if (this.runMetrics) this.runMetrics.outcome = 'error';
             return;

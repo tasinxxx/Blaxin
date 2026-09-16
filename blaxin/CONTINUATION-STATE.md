@@ -1,17 +1,115 @@
 # BLAXIN Engineering Mission — Continuation State
 
 MISSION PHASE: A — LOCKED COMPLETE · PHASE B — IN PROGRESS (parity floor established → 10×)
-CURRENT OBJECTIVE: PHASE B — 10× BLAXIN (see docs/capability-matrix.md; §4 gaps updated after Part B2)
-CURRENT SUBTASK: 10× items — closed-loop computer-use is PROVEN (Part B2); next: adaptive model routing depth, smooth-motion tuning, battery telemetry, dedupe verb, LLM decision stage when a vision model lands
-CURRENT STATUS: Objectives 1–3 of the Phase B directive COMPLETE with fresh evidence — closed-loop computer use 9/9 repeatable on real pixels; system-audio live-verified on the real PipeWire sink; bulk-files verified on the real filesystem. FULL suite 826 passed / 15 skipped / 0 failed. All three Stonic parity gaps from the audit are CLOSED.
+CURRENT OBJECTIVE: PHASE B — 10× BLAXIN (see docs/capability-matrix.md; §4 gaps updated after Part B3)
+CURRENT SUBTASK: 10× items — adaptive model routing CLOSED (Part B3); next: content-hash dedupe verb for bulk-files, mission-panel surfacing of bulk operation results, smooth-motion/focus-aware keyboard polish
+CURRENT STATUS: Part B3 COMPLETE — capability-aware adaptive model routing implemented, tested (15) and live-probed 16/16 on the real runtime (real local inference, honest vision BLOCK, live bounded fallback after a real NETWORK_ERROR). System-awareness telemetry implemented + contract-tested (12). FULL suite 853 passed / 15 skipped / 0 failed. Client build clean, E2E 8/8.
 COMPLETED: Parts 15–19 (specialist ownership, recovery/re-plan, mission journal, live desktop + real-Chrome verification, tool verification-in-depth, JARVIS state reflection, mission coordination, budget config surface, branding, documentation)
 VERIFIED (fresh this audit): server tsc clean · FULL suite 779 passed / 12 skipped / 0 failed · client tsc -b + vite build clean · E2E 8/8 (18.2s) · real-Chrome probe 14/14 PASS · live X desktop 5/5 · real-Chrome CDP 6/6 · bundle-sync guard idempotent, bundled dist carries Parts 16–17 (md5-identical to server/dist) · version 1.4.0 consistent across VERSION/tauri/server/client/APP_VERSION · docs current (README + docs/specialists.md + docs/branding.md) · git tree clean, all work pushed to origin/main
 BLOCKED (environment, not code): live-LLM round trips (no provider key configured on this machine — deterministic model-path tests + probe cover the paths); voice PHYSICAL audio output (browser TTS/STT code is real and feature-detected, but no verifiable audio sink exists in this environment); live keystroke-receiver verification (host has a focused window; injection is honestly reported as "events sent; receiver not verified")
 KNOWN FAILURES: none open
 KNOWN LIMITATIONS: mission verification is derived in MissionStore (single source of truth); missions completed before coordination existed read UNVERIFIED; the on-disk .deb predates the Part 18 icons (CI regenerates assets on release; a local rebuild is required before any manual artifact check)
-NEXT EXACT ACTION (PHASE B, 10×): every confirmed Stonic parity capability is now MATCHED or SUPERIOR (see the matrix — the three PARTIAL/MISSING rows are CLOSED). Continue the 10× mission in priority order: (1) adaptive model routing (route vision tasks to a vision model when one exists; honest degradation when not); (2) smooth-motion + focus-aware keyboard polish in computer-control (motion curves, per-window key targeting); (3) battery telemetry from /sys/class/power_supply; (4) content-hash dedupe verb for bulk-files; (5) mission-panel surfacing of bulk operation results. When a vision-capable local model OR a provider key becomes available: re-run probe-computer-use.mjs — the LLM decision stage lights up automatically and the loop upgrades from OCR-grounded to model-grounded.
+NEXT EXACT ACTION (PHASE B, 10×): (1) content-hash dedupe verb for bulk-files (real SHA-256 content identity, honest per-item results, HIGH risk tier like the other destructive verbs); (2) mission-panel surfacing of bulk operation results; (3) smooth-motion + focus-aware keyboard polish in computer-control. When a vision-capable local model OR a provider key becomes available: re-run probe-computer-use.mjs AND probe-model-routing.mjs — the LLM decision stage lights up and the router selects the vision model automatically (both paths are proven and env-adaptive).
 RELEASE BLOCKERS: v1.4.0 tag remains deferred — it follows the Phase B scope decision (parity-complete release)
 FINAL RELEASE STATUS: NOT STARTED (Phase B)
+
+---
+
+## SESSION — ADAPTIVE MODEL ROUTING + SYSTEM AWARENESS CLOSED (2026-09-16, PART B3)
+
+Continued the Phase B 10× directive exactly in order (Objective 1 from Part B2's
+NEXT EXACT ACTION). Resumed the uncommitted WIP; repository reality confirmed
+the routing core was already written — the work was finishing its tests,
+live-proofing it on the real runtime, and closing the telemetry gap in the
+same directive. Two failures found and fixed: one TEST bug, one PROBE bug.
+No implementation weakening anywhere.
+
+### 1. Adaptive model routing (10× Objective 1) — CLOSED
+- NEW `router/model-router.ts`: pure deterministic routing core. Derives what
+  a task REQUIRES (chat/tool-calling/vision/local from real evidence: tool
+  definitions in the payload, image-carrying messages in the replay window,
+  screen-ask phrasing, offline phrasing), matches against models REALLY
+  available, and decides with full evidence: candidates, per-candidate
+  rejection reasons, selection rationale, bounded failure history.
+  · HONESTY RULES: a required capability that no model offers = BLOCK naming
+    it (never a silent downgrade); capability UNKNOWN (no machine-readable
+    data) never counts as a match; identical inputs → identical decisions.
+  · Bounded `ModelReliability`: per-(provider,model) outcome ring that only
+    DEMOTES repeatedly failing candidates (threshold 3), never blacklists;
+    the active configured model keeps first-try preference when compatible.
+- `providers/ollama.ts`: real capability probing — /api/tags `capabilities`
+  (completion/tools/thinking/vision) mapped honestly; a model reporting no
+  capability data stays UNKNOWN (family names are NEVER capability proof);
+  bounded per-model probe cache (TTL, max 64).
+- `providers/index.ts`: `getAvailableModels()` — models from providers
+  actually usable right now, bounded TTL cache, invalidated on key
+  save/remove/refresh.
+- `orchestrator/index.ts`: routing wired into the LLM path — required-
+  capability derivation, `model-routing` event (required/candidates/
+  rejected/selected/latency), honest BLOCK → `error NO_PROVIDER` + run
+  closed with REAL metrics (0 model calls — never a fake attempt);
+  capability-aware bounded fallback after a failed call (re-route with
+  ignoreActiveModel, real outcome recorded, fallback evidence on the
+  routing event + journal); routing latency measured.
+- Journal: NEW kind ROUTING with real evidence (required, candidates,
+  rejected, selected, fallback, missingCapability, latencyMs); key-shaped
+  strings redacted from objectives. Client: ROUTING badge + needs/missing
+  chips + routed/rejected/considered fields on the Journal page.
+- Tests: `__tests__/model-routing.test.ts` (15) — pure decisions (honest
+  vision block, compatible selection, unknown-capability rejection,
+  provider-unavailable by name, reliability demotion, determinism, real
+  Ollama capability mapping) + orchestrator end-to-end (deterministic task
+  = 0 model calls + no routing event; local selection journaled; vision
+  block with 0 model calls + honest error; vision-capable selection;
+  tool-incapable rejection; live-ish bounded fallback with real outcomes;
+  bounded escalation ≤ candidates; secrets never in the journal).
+- LIVE PROOF `scripts/probe-model-routing.mjs`: **16/16 PASS** on the real
+  runtime + real local Ollama — P1 deterministic 0 model calls, router not
+  consulted; P2 capability-compatible LOCAL model selected on real
+  /api/tags data (qwen3:4b, real 386s inference); P3 vision task BLOCKED
+  honestly with 0 model calls; P4 completion-only model rejected; P5
+  ROUTING evidence persisted (COMPLETED + BLOCKED lines); P6 the planted
+  key never reaches the journal. Includes a LIVE bounded fallback observed
+  in a prior run (qwen3:4b real NETWORK_ERROR → llama3.2:3b re-route,
+  journaled). Probe hardening during verification: terminal-event wait
+  reads the run-closing task-complete (the error event carries no
+  metrics), and LLM-path budgets raised to 600s — machine reality on this
+  8GB CPU-only box (measured worst case ~5 min/model call).
+
+### 2. System awareness telemetry (10× Objective 3) — CLOSED
+- `utils/system-telemetry.ts`: battery (/sys/class/power_supply, honest
+  minutes-remaining bounds, Charging only when AC online), display+windows
+  (xprop/xwininfo parsers, one-two spawns per request), audio (wpctl volume
+  + mute), per-process CPU (kernel tick deltas — same honesty as the
+  system CPU number), all honest-unavailable when the source is absent
+  (null is never rendered as zero). Rides the existing live system panel
+  endpoint.
+- Tests: `__tests__/system-awareness.test.ts` (12) — contract-based, never
+  machine-specific. ONE TEST BUG fixed during verification: the wpctl
+  parser expectation claimed `muted: null` for a volume line without
+  [MUTED] — contradicted line 118 of the same file and CONTRADICTED BY
+  THE REAL SINK (live wpctl round-trip: unmuted prints no marker, muted
+  prints [MUTED]). Fixed to the verified semantic `muted: false`.
+
+### Verification this phase (evidence, no claims)
+- Server `tsc --noEmit` clean; FULL suite **853 passed / 15 skipped / 0
+  failed** (826 → 853; skips = env-gated live runs).
+- Client `tsc -b` + `vite build` clean; E2E **8/8 PASS** (46.5s).
+- probe-model-routing: **16/16 PASS** (fresh final run; runs 1–3 were used
+  to root-cause a probe-timing bug + one inference-timeout, both fixed —
+  never by weakening an assertion).
+- bundle-sync-guard: synced then idempotent; version 1.4.0 consistent.
+- Housekeeping: `.freebuff/` + `client/test-results/` gitignored; one-off
+  `server/rtdebug.mjs` scratch removed (superseded by the probe).
+
+### Honest remaining gaps
+- LLM decision stage in computer-use stays `unverified-fallback` until a
+  vision-capable model exists here (routing now SELECTS one automatically
+  the moment it appears — re-run both probes then).
+- Voice physical round trip: environment-blocked (unchanged).
+- The P3 block path closes the run as RESULT/FAILED NO_PROVIDER by design
+  (honest); a dedicated BLOCKED executionMode is possible polish, not a
+  correctness gap.
 
 ---
 

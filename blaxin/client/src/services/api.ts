@@ -71,7 +71,7 @@ export type JournalStatus =
   | 'BLOCKED' | 'RECOVERING' | 'RECOVERED' | 'UNVERIFIED';
 
 export type JournalKind =
-  | 'COMMAND' | 'ROUTER' | 'PLAN' | 'DELEGATED' | 'ACTION' | 'OBSERVATION'
+  | 'COMMAND' | 'ROUTER' | 'PLAN' | 'DELEGATED' | 'ROUTING' | 'ACTION' | 'OBSERVATION'
   | 'VERIFICATION' | 'RECOVERY' | 'REPLAN' | 'MEMORY' | 'RESULT';
 
 export interface JournalEntry {
@@ -102,6 +102,17 @@ export interface JournalEntry {
   failure?: string;
   recovery?: string;
   detail?: string;
+  /** REAL model-routing evidence (kind ROUTING). */
+  routing?: {
+    required: string[];
+    candidates?: string[];
+    rejected?: Array<{ candidate: string; reason: string; capability?: string; detail?: string }>;
+    selected?: string;
+    selectionReason?: string;
+    fallback?: string;
+    missingCapability?: string;
+    latencyMs?: number;
+  };
 }
 
 // ── Live system telemetry ─────────────────────────────────────

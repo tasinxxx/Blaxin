@@ -79,6 +79,7 @@ Implemented this phase (independent implementation, no cloning):
 | Closed-loop computer use | **PROVEN** — 9/9 repeatable probe on real pixels; LLM decision stage honest-fallbacks until a vision model is installed | Parity loop proven |
 | Live-LLM vision round trip | Env-blocked (no provider key; no local vision-capable model) — payload contract fully proven | Environment limitation |
 | Voice physical round-trip | Env-blocked (documented) | Environment limitation |
-| Battery telemetry | Tracked | 10×, environment-dependent |
+| Battery telemetry | **CLOSED** — `/sys/class/power_supply` + X11/window/audio/process sensors live on the system panel; 12 pinned contract tests (`system-awareness.test.ts`) | 10× closed |
+| Adaptive model routing | **CLOSED** — capability-aware router (real `/api/tags` capability data, honest BLOCK, bounded fallback + reliability history); live probe **16/16 PASS** on the real runtime incl. real local inference, the honest vision block, and a live bounded fallback after a real NETWORK_ERROR | 10× closed |
 | Content-hash dedupe verb | Tracked | 10× convenience |
 | Persona editor / world monitor | Non-goals for parity; 10× candidates | Optional |

@@ -5,12 +5,19 @@
 // between calls, memory from os.totalmem/freemem, disk from statfs
 // (with a df fallback). No polling happens server-side — each request
 // is one cheap read; the client controls the cadence.
+//
+// 10× system awareness: battery (/sys/class/power_supply), display +
+// windows (X11 via xwininfo/xprop, ONE-TWO spawns per request), audio
+// (wpctl get-volume), and per-process CPU (kernel tick deltas from
+// /proc — the same honest delta semantics as the CPU number). Every
+// sensor reports an honest UNAVAILABLE (null / explicit reason) when
+// its source is absent — a null is never rendered as a zero.
 // =============================================================
 
 import os from 'os';
 import { execFile } from 'child_process';
 import { promisify } from 'util';
-import { readFileSync } from 'fs';
+import { readFileSync, existsSync, readdirSync } from 'fs';
 import { statfsSync } from 'fs';
 
 const execFileAsync = promisify(execFile);
@@ -37,6 +44,84 @@ export interface DiskTelemetry {
   mount: string;
 }
 
+export interface BatteryCell {
+  name: string;
+  status: string;
+  capacityPercent: number | null;
+  /** Real per-cell power draw (µW→W) when the sensor reports it. */
+  powerWatts: number | null;
+  technology: string | null;
+  model: string | null;
+}
+
+export interface BatteryTelemetry {
+  /** True when AC mains is online right now. */
+  acOnline: boolean | null;
+  /** Kernel battery status, verbatim ('Charging', 'Discharging', …). */
+  status: string | null;
+  capacityPercent: number | null;
+  /** Bounded minutes remaining derived from real energy/power fields. */
+  minutesRemaining: number | null;
+  /** Real draw across batteries in watts when sensors report it. */
+  powerWatts: number | null;
+  cycleCount: number | null;
+  model: string | null;
+  cells: BatteryCell[];
+  /** null = this machine has no battery at all (honest desktop case). */
+  present: boolean;
+}
+
+export interface DisplayTelemetry {
+  available: boolean;
+  /** Why it is unavailable when available=false (honest, no guessing). */
+  unavailableReason?: string;
+  /** X display name actually read (e.g. ':0'). */
+  display: string | null;
+  widthPx: number | null;
+  heightPx: number | null;
+  /** The window manager's active (focused) window, from _NET_ACTIVE_WINDOW. */
+  activeWindowId: string | null;
+  activeWindowTitle: string | null;
+}
+
+export interface WindowInfo {
+  id: string;
+  title: string | null;
+  wmClass: string | null;
+  geometry: { x: number; y: number; width: number; height: number } | null;
+}
+
+export interface WindowsTelemetry {
+  available: boolean;
+  unavailableReason?: string;
+  windows: WindowInfo[];
+  /** Bounded list (first N windows, stacking order). */
+  truncated: boolean;
+}
+
+export interface AudioTelemetry {
+  available: boolean;
+  unavailableReason?: string;
+  /** Output volume percent of the default sink (0–150, wpctl scale). */
+  volumePercent: number | null;
+  muted: boolean | null;
+}
+
+export interface ProcessInfo {
+  pid: number;
+  comm: string;
+  /** Real per-process CPU % from kernel tick deltas (null on first sample). */
+  cpuPercent: number | null;
+  rssBytes: number | null;
+}
+
+export interface ProcessesTelemetry {
+  count: number;
+  /** Top processes by CPU delta (bounded). First call: cpuPercent null. */
+  top: ProcessInfo[];
+  totalRssBytes: number | null;
+}
+
 export interface SystemTelemetry {
   timestamp: number;
   cpu: CpuTelemetry;
@@ -45,6 +130,12 @@ export interface SystemTelemetry {
   uptimeSec: number;
   os: { platform: string; release: string; arch: string; hostname: string };
   nodeVersion: string;
+  /** 10× system awareness sensors — each null-honest when absent. */
+  battery: BatteryTelemetry | null;
+  display: DisplayTelemetry | null;
+  windows: WindowsTelemetry | null;
+  audio: AudioTelemetry | null;
+  processes: ProcessesTelemetry;
 }
 
 interface CpuSample {
@@ -188,6 +279,357 @@ export function getNetworkTelemetry(): NetworkTelemetry {
   };
 }
 
+// ── Battery (real /sys/class/power_supply) ─────────────────
+
+interface PsUevent {
+  [key: string]: string;
+}
+
+function readUevent(dir: string): PsUevent {
+  const out: PsUevent = {};
+  try {
+    const raw = readFileSync(`${dir}/uevent`, 'utf-8');
+    for (const line of raw.split('\n')) {
+      const eq = line.indexOf('=');
+      if (eq > 0) out[line.slice(0, eq)] = line.slice(eq + 1);
+    }
+  } catch {
+    /* absent field */
+  }
+  return out;
+}
+
+function num(v: string | undefined): number | null {
+  if (v === undefined || !/^\d+$/.test(v)) return null;
+  return Number(v);
+}
+
+export function getBatteryTelemetry(now: number = Date.now()): BatteryTelemetry {
+  let entries: string[] = [];
+  try {
+    entries = readdirSync('/sys/class/power_supply');
+  } catch {
+    return { present: false, acOnline: null, status: null, capacityPercent: null, minutesRemaining: null, powerWatts: null, cycleCount: null, model: null, cells: [] };
+  }
+  const isBattery = (d: string) => {
+    try {
+      return readUevent(`/sys/class/power_supply/${d}`).POWER_SUPPLY_TYPE?.split(',')[0] === 'Battery';
+    } catch {
+      return false;
+    }
+  };
+  const isMains = (d: string) => {
+    try {
+      return readUevent(`/sys/class/power_supply/${d}`).POWER_SUPPLY_TYPE === 'Mains';
+    } catch {
+      return false;
+    }
+  };
+  const batteries = entries.filter(isBattery);
+  const ac = entries.find(isMains);
+
+  const cells: BatteryCell[] = batteries.map((name) => {
+    const d = `/sys/class/power_supply/${name}`;
+    const u = readUevent(d);
+    const status = u.POWER_SUPPLY_STATUS ?? null;
+    const energyNow = num(u.POWER_SUPPLY_ENERGY_NOW);
+    const powerNow = num(u.POWER_SUPPLY_POWER_NOW);
+    let minutes: number | null = null;
+    if (energyNow !== null && powerNow !== null && powerNow > 0) {
+      minutes = status === 'Charging'
+        ? Math.round(((num(u.POWER_SUPPLY_ENERGY_FULL) ?? 0) - energyNow) / powerNow * 60)
+        : Math.round((energyNow / powerNow) * 60);
+      if (!Number.isFinite(minutes) || minutes < 0 || minutes > 24 * 60) minutes = null;
+    }
+    return {
+      name,
+      status,
+      capacityPercent: num(u.POWER_SUPPLY_CAPACITY),
+      powerWatts: powerNow !== null ? Math.round((powerNow / 1_000_000) * 100) / 100 : null,
+      technology: u.POWER_SUPPLY_TECHNOLOGY ?? null,
+      model: u.POWER_SUPPLY_MODEL_NAME?.trim() || null,
+    };
+  });
+
+  if (batteries.length === 0 && ac === undefined) {
+    return { present: false, acOnline: null, status: null, capacityPercent: null, minutesRemaining: null, powerWatts: null, cycleCount: null, model: null, cells: [] };
+  }
+
+  const acOnline = ac !== undefined ? num(readUevent(`/sys/class/power_supply/${ac}`).POWER_SUPPLY_ONLINE) === 1 : null;
+  const caps = cells.map((c) => c.capacityPercent).filter((v): v is number => v !== null);
+  const capacityPercent = caps.length > 0 ? Math.round(caps.reduce((a, b) => a + b, 0) / caps.length) : null;
+  const status = acOnline === true ? 'Charging' : (cells.find((c) => c.status)?.status ?? null);
+  const minutes = cells.map((c) => {
+    const u = readUevent(`/sys/class/power_supply/${c.name}`);
+    const energyNow = num(u.POWER_SUPPLY_ENERGY_NOW);
+    const powerNow = num(u.POWER_SUPPLY_POWER_NOW);
+    if (energyNow === null || powerNow === null || powerNow <= 0) return null;
+    const m = acOnline === true
+      ? Math.round(((num(u.POWER_SUPPLY_ENERGY_FULL) ?? 0) - energyNow) / powerNow * 60)
+      : Math.round((energyNow / powerNow) * 60);
+    return Number.isFinite(m) && m >= 0 && m <= 24 * 60 ? m : null;
+  }).filter((v): v is number => v !== null);
+  const watts = cells.map((c) => c.powerWatts).filter((v): v is number => v !== null);
+  const cycle = cells.map((c) => {
+    const u = readUevent(`/sys/class/power_supply/${c.name}`);
+    return num(u.POWER_SUPPLY_CYCLE_COUNT);
+  }).find((v) => v !== null) ?? null;
+  const model = cells.map((c) => c.model).find(Boolean) ?? null;
+
+  void now;
+  return {
+    present: true,
+    acOnline,
+    status,
+    capacityPercent,
+    minutesRemaining: minutes.length > 0 ? Math.min(...minutes) : null,
+    powerWatts: watts.length > 0 ? Math.round(watts.reduce((a, b) => a + b, 0) * 100) / 100 : null,
+    cycleCount: cycle,
+    model,
+    cells,
+  };
+}
+
+// ── Display + windows (real X11, bounded spawns) ────────────
+
+function xDisplayCandidates(): string[] {
+  const out: string[] = [];
+  if (process.env.DISPLAY) out.push(process.env.DISPLAY);
+  if (!out.includes(':0')) out.push(':0');
+  if (!out.includes(':0.0')) out.push(':0.0');
+  return out;
+}
+
+async function xrun(cmd: string, args: string[], display: string, timeoutMs: number): Promise<string> {
+  const { stdout } = await execFileAsync(cmd, args, {
+    timeout: timeoutMs,
+    env: { ...process.env, DISPLAY: display },
+    maxBuffer: 512 * 1024,
+  });
+  return stdout;
+}
+
+export function parseXwininfoTree(stdout: string): { width: number | null; height: number | null } {
+  // `xwininfo -root` reports the root geometry as Width:/Height: fields.
+  const w = stdout.match(/^\s*Width:\s*(\d+)/m);
+  const h = stdout.match(/^\s*Height:\s*(\d+)/m);
+  return { width: w ? Number(w[1]) : null, height: h ? Number(h[1]) : null };
+}
+
+export function parseActiveWindowId(xpropRoot: string): string | null {
+  const m = xpropRoot.match(/window id #\s*(0x[0-9a-f]+)/i);
+  return m ? m[1] : null;
+}
+
+export function parseWindowGeometry(xwininfoOut: string): { x: number; y: number; width: number; height: number } | null {
+  const m = xwininfoOut.match(/Absolute upper-left X:\s*(-?\d+)[\s\S]*?Absolute upper-left Y:\s*(-?\d+)[\s\S]*?Width:\s*(\d+)[\s\S]*?Height:\s*(\d+)/);
+  return m ? { x: Number(m[1]), y: Number(m[2]), width: Number(m[3]), height: Number(m[4]) } : null;
+}
+
+export function parseXpropClass(xpropOut: string): string | null {
+  const m = xpropOut.match(/WM_CLASS\(STRING\)\s*=\s*"([^"]*)",\s*"([^"]*)"/);
+  return m ? m[2] || m[1] : null;
+}
+
+export function parseNetWmName(xpropOut: string): string | null {
+  const m = xpropOut.match(/_NET_WM_NAME\(UTF8_STRING\)\s*=\s*"([\s\S]*?)"\s*\n/);
+  return m ? m[1] : null;
+}
+
+const MAX_WINDOWS = 40;
+
+export async function getDisplayAndWindowsTelemetry(): Promise<{ display: DisplayTelemetry | null; windows: WindowsTelemetry | null }> {
+  for (const display of xDisplayCandidates()) {
+    try {
+      // ONE spawn for the root: geometry + active window id together.
+      const rootOut = await xrun('xprop', ['-root'], display, 3000);
+      const activeId = parseActiveWindowId(rootOut);
+      // ONE spawn for the root geometry.
+      let width: number | null = null;
+      let height: number | null = null;
+      try {
+        const geo = parseXwininfoTree(await xrun('xwininfo', ['-root'], display, 3000));
+        width = geo.width;
+        height = geo.height;
+      } catch { /* xwininfo absent — geometry stays null, xprop data is still real */ }
+
+      // Windows: bounded walk. wmctrl is absent on many machines; use
+      // xwininfo -root -children + per-window xprop (bounded to 40).
+      const windows: WindowInfo[] = [];
+      let truncated = false;
+      try {
+        const children = await xrun('xwininfo', ['-root', '-children'], display, 3000);
+        const ids: string[] = [];
+        for (const m of children.matchAll(/(^|\s)(0x[0-9a-f]+)\s+(?:\d+\s+){5}/g)) ids.push(m[2]);
+        for (const id of ids.slice(0, MAX_WINDOWS)) {
+          try {
+            const props = await xrun('xprop', ['-id', id, 'WM_CLASS', '_NET_WM_NAME'], display, 2000);
+            const wmClass = parseXpropClass(props);
+            const title = parseNetWmName(props);
+            if (!wmClass && !title) continue; // unmapped/pseudo windows have no identity
+            let geometry: WindowInfo['geometry'] = null;
+            try {
+              geometry = parseWindowGeometry(await xrun('xwininfo', ['-id', id], display, 2000));
+            } catch { /* geometry optional */ }
+            windows.push({ id, title, wmClass, geometry });
+          } catch { /* window vanished mid-walk — skip honestly */ }
+        }
+        truncated = ids.length > MAX_WINDOWS;
+      } catch (e: any) {
+        if (windows.length === 0) {
+          return {
+            display: { available: true, display, widthPx: width, heightPx: height, activeWindowId: activeId, activeWindowTitle: null },
+            windows: { available: false, unavailableReason: `window enumeration failed: ${String(e?.message ?? e).slice(0, 120)}`, windows: [], truncated: false },
+          };
+        }
+      }
+
+      let activeWindowTitle: string | null = null;
+      if (activeId) {
+        try {
+          const props = await xrun('xprop', ['-id', activeId, '_NET_WM_NAME', 'WM_CLASS'], display, 2000);
+          activeWindowTitle = parseNetWmName(props) ?? parseXpropClass(props);
+        } catch { /* active window vanished between reads */ }
+      }
+
+      return {
+        display: { available: true, display, widthPx: width, heightPx: height, activeWindowId: activeId, activeWindowTitle },
+        windows: { available: true, windows, truncated },
+      };
+    } catch (e: any) {
+      const msg = String(e?.message ?? e);
+      if (!/Cannot open display|unable to open|No protocol/i.test(msg)) {
+        // xprop missing etc — no point trying other displays, same tools.
+        return {
+          display: { available: false, unavailableReason: `X query failed: ${msg.slice(0, 120)}`, display: null, widthPx: null, heightPx: null, activeWindowId: null, activeWindowTitle: null },
+          windows: { available: false, unavailableReason: `X query failed: ${msg.slice(0, 120)}`, windows: [], truncated: false },
+        };
+      }
+      // Try the next display candidate.
+    }
+  }
+  return {
+    display: { available: false, unavailableReason: 'no reachable X display (headless or DISPLAY unset)', display: null, widthPx: null, heightPx: null, activeWindowId: null, activeWindowTitle: null },
+    windows: { available: false, unavailableReason: 'no reachable X display (headless or DISPLAY unset)', windows: [], truncated: false },
+  };
+}
+
+// ── Audio (real wpctl, read-only) ───────────────────────────
+
+export function parseWpctlVolume(out: string): { volumePercent: number | null; muted: boolean | null } {
+  const m = out.match(/Volume:\s*([\d.]+)/);
+  if (!m) return { volumePercent: null, muted: null };
+  // wpctl prints "[MUTED]" ONLY when muted — a parsed volume line without
+  // it is genuinely unmuted (real wpctl semantic, not an assumption).
+  return {
+    volumePercent: Math.round(parseFloat(m[1]) * 100),
+    muted: /MUTED/.test(out) ? true : false,
+  };
+}
+
+export async function getAudioTelemetry(): Promise<AudioTelemetry> {
+  try {
+    const { stdout } = await execFileAsync('wpctl', ['get-volume', '@DEFAULT_AUDIO_SINK@'], { timeout: 3000, maxBuffer: 64 * 1024 });
+    const { volumePercent, muted } = parseWpctlVolume(stdout);
+    if (volumePercent === null) {
+      return { available: false, unavailableReason: 'wpctl output not parseable', volumePercent: null, muted: null };
+    }
+    return { available: true, volumePercent, muted };
+  } catch (e: any) {
+    const code = String(e?.code ?? '');
+    return {
+      available: false,
+      unavailableReason: code === 'ENOENT' ? 'wpctl (PipeWire) not installed' : `wpctl failed: ${String(e?.message ?? e).slice(0, 120)}`,
+      volumePercent: null,
+      muted: null,
+    };
+  }
+}
+
+// ── Processes (real /proc tick deltas — same honesty as CPU %) ──
+
+interface ProcSample {
+  pid: number;
+  comm: string;
+  ticks: number;
+  rssBytes: number | null;
+  sampledAt: number;
+}
+
+let lastProcSamples: Map<number, ProcSample> | null = null;
+
+export function parseStat(stat: string): { utime: number; stime: number; comm: string; rssPages: number | null } | null {
+  // comm can contain spaces and parentheses — split from the LAST ')'.
+  const close = stat.lastIndexOf(')');
+  if (close < 0) return null;
+  const comm = stat.slice(stat.indexOf('(') + 1, close);
+  const fields = stat.slice(close + 2).split(' ');
+  // After 'state' (fields[0]), utime is field 11 and stime 12 in the
+  // full line; relative to fields here: index 11-1=10 and 11.
+  const utime = Number(fields[11]);
+  const stime = Number(fields[12]);
+  const rssPages = /^\d+$/.test(fields[21] ?? '') ? Number(fields[21]) : null;
+  if (!Number.isFinite(utime) || !Number.isFinite(stime)) return null;
+  return { utime, stime, comm, rssPages };
+}
+
+export function readProcSamples(): Map<number, ProcSample> {
+  const out = new Map<number, ProcSample>();
+  const hz = 100; // CLK_TCK is 100 on essentially all Linux userlands
+  const pageSize = 4096;
+  let at = Date.now();
+  try {
+    for (const pid of readdirSync('/proc')) {
+      if (!/^\d+$/.test(pid)) continue;
+      try {
+        const stat = readFileSync(`/proc/${pid}/stat`, 'utf-8');
+        const p = parseStat(stat);
+        if (!p) continue;
+        out.set(Number(pid), {
+          pid: Number(pid),
+          comm: p.comm.slice(0, 64),
+          ticks: p.utime + p.stime,
+          rssBytes: p.rssPages !== null ? p.rssPages * pageSize : null,
+          sampledAt: at,
+        });
+      } catch { /* process vanished — skip */ }
+    }
+  } catch { /* /proc unavailable */ }
+  void hz;
+  return out;
+}
+
+const MAX_TOP_PROCESSES = 8;
+
+export function getProcessesTelemetry(): ProcessesTelemetry {
+  const now = Date.now();
+  const current = readProcSamples();
+  const prev = lastProcSamples;
+  lastProcSamples = current;
+
+  const totalRss = [...current.values()].reduce((s, p) => s + (p.rssBytes ?? 0), 0);
+  if (!prev || prev.size === 0) {
+    // First sample: no delta exists yet — null, never a fake 0%.
+    return { count: current.size, top: [], totalRssBytes: totalRss > 0 ? totalRss : null };
+  }
+  const dtSec = Math.max(0.001, (now - (prev.values().next().value?.sampledAt ?? now)) / 1000);
+  const ranked: ProcessInfo[] = [];
+  for (const [pid, cur] of current) {
+    const before = prev.get(pid);
+    if (!before) continue; // new process: no honest delta yet
+    const deltaTicks = cur.ticks - before.ticks;
+    if (deltaTicks < 0) continue;
+    const cpuPercent = Math.min(100, Math.round((deltaTicks / (dtSec * 100)) * 100 * 10) / 10);
+    ranked.push({ pid, comm: cur.comm, cpuPercent, rssBytes: cur.rssBytes });
+  }
+  ranked.sort((a, b) => (b.cpuPercent ?? 0) - (a.cpuPercent ?? 0) || (b.rssBytes ?? 0) - (a.rssBytes ?? 0));
+  return {
+    count: current.size,
+    top: ranked.slice(0, MAX_TOP_PROCESSES).filter((p) => (p.cpuPercent ?? 0) > 0 || (p.rssBytes ?? 0) > 50 * 1024 * 1024),
+    totalRssBytes: totalRss > 0 ? totalRss : null,
+  };
+}
+
 export async function getSystemTelemetry(): Promise<SystemTelemetry> {
   const memTotal = os.totalmem();
   const memFree = os.freemem();
@@ -197,6 +639,7 @@ export async function getSystemTelemetry(): Promise<SystemTelemetry> {
   // Home is always a real, existing mount — the most meaningful disk for
   // the user's data (BLAXIN state lives under ~/.local/share/blaxin).
   const disk = await diskUsage(os.homedir());
+  const [displayWindows, audio] = await Promise.all([getDisplayAndWindowsTelemetry(), getAudioTelemetry()]);
 
   return {
     timestamp: Date.now(),
@@ -216,5 +659,10 @@ export async function getSystemTelemetry(): Promise<SystemTelemetry> {
     uptimeSec: os.uptime(),
     os: { platform: os.platform(), release: os.release(), arch: os.arch(), hostname: os.hostname() },
     nodeVersion: process.version,
+    battery: getBatteryTelemetry(),
+    display: displayWindows.display,
+    windows: displayWindows.windows,
+    audio,
+    processes: getProcessesTelemetry(),
   };
 }

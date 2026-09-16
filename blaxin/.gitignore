@@ -47,9 +47,13 @@ resources/**/*
 e2e/.runtime/
 e2e/test-results/
 e2e/playwright-report/
+client/test-results/
 
 # Runtime identity + secrets (persisted key material — never commit)
 body-identity.json
 brain-identity.json
 *-credentials
 blaxin-config.json
+
+# Freebuff client metadata (tool-owned, not project source)
+.freebuff/

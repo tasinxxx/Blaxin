@@ -29,6 +29,7 @@ const KIND_COLOR: Record<string, string> = {
   ROUTER: 'var(--accent-secondary)',
   PLAN: 'var(--accent-secondary)',
   DELEGATED: 'var(--accent-primary)',
+  ROUTING: 'var(--accent-primary)',
   ACTION: 'var(--text-primary)',
   OBSERVATION: 'var(--text-secondary)',
   VERIFICATION: 'var(--accent-green)',
@@ -39,7 +40,7 @@ const KIND_COLOR: Record<string, string> = {
 };
 
 const ALL_KINDS: JournalKind[] = [
-  'COMMAND', 'ROUTER', 'PLAN', 'DELEGATED', 'ACTION', 'OBSERVATION',
+  'COMMAND', 'ROUTER', 'PLAN', 'DELEGATED', 'ROUTING', 'ACTION', 'OBSERVATION',
   'VERIFICATION', 'RECOVERY', 'REPLAN', 'MEMORY', 'RESULT',
 ];
 
@@ -207,6 +208,16 @@ export function JournalPage() {
                   replan {e.replanNumber}/{e.replanBudget ?? '?'}
                 </span>
               )}
+              {e.routing?.required && e.routing.required.length > 0 && (
+                <span style={{ fontSize: 10, color: 'var(--accent-secondary)' }}>
+                  needs: {e.routing.required.join('+')}
+                </span>
+              )}
+              {e.routing?.missingCapability && (
+                <span style={{ fontSize: 10, color: 'var(--accent-red)' }}>
+                  missing: {e.routing.missingCapability}
+                </span>
+              )}
               <span style={{ marginLeft: 'auto', fontSize: 10, color: 'var(--text-muted)', display: 'flex', alignItems: 'center', gap: 4 }}>
                 <FiClock size={10} /> {timeString(e.at)}
               </span>
@@ -230,6 +241,28 @@ export function JournalPage() {
                 : e.recovery}
             />
             <Field label="plan change" value={e.planChange} />
+            {e.kind === 'ROUTING' && e.routing && (
+              <Field
+                label="routed"
+                value={[
+                  e.routing.selected,
+                  e.routing.selectionReason,
+                  e.routing.fallback,
+                  e.routing.latencyMs !== undefined ? `${e.routing.latencyMs}ms` : null,
+                ].filter(Boolean).join(' — ') || undefined}
+              />
+            )}
+            {e.kind === 'ROUTING' && e.routing?.rejected && e.routing.rejected.length > 0 && (
+              <Field
+                label="rejected"
+                value={e.routing.rejected
+                  .map((r) => `${r.candidate} (${r.reason}${r.capability ? `: ${r.capability}` : ''})`)
+                  .join('; ')}
+              />
+            )}
+            {e.kind === 'ROUTING' && e.routing?.candidates && e.routing.candidates.length > 0 && (
+              <Field label="considered" value={e.routing.candidates.join(', ')} />
+            )}
             <Field label="detail" value={e.detail} />
             <Field
               label="ids"

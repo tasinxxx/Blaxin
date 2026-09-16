@@ -196,6 +196,7 @@ class ProviderRegistry {
     credentialStore.save(providerId, trimmed);
     const provider = this.getProvider(providerId);
     (provider as any).apiKey = trimmed;
+    this.availableModelsCache = null;
     logger.info('providers', `API key saved for ${provider.name}`);
     return { valid: true };
   }
@@ -204,6 +205,7 @@ class ProviderRegistry {
     credentialStore.remove(providerId);
     const provider = this.getProvider(providerId);
     (provider as any).apiKey = null;
+    this.availableModelsCache = null;
     logger.info('providers', `API key removed for ${provider.name}`);
   }
 
@@ -216,11 +218,31 @@ class ProviderRegistry {
     try {
       const models = await provider.fetchModels();
       this.modelsCache.set(providerId, models);
+      this.availableModelsCache = null;
       return models;
     } catch (error: any) {
       logger.error('providers', `Failed to fetch models for ${provider.name}`, error);
       throw error;
     }
+  }
+
+  /**
+   * Models REALLY available right now across usable providers (10×
+   * adaptive routing): keyless providers are skipped, Ollama is always
+   * probed, failing providers contribute nothing. Bounded TTL cache so
+   * the routing hot path stays light (8GB CPU-only target).
+   */
+  private availableModelsCache: { models: ModelInfo[]; at: number } | null = null;
+  private static readonly AVAILABLE_MODELS_TTL_MS = 60_000;
+
+  async getAvailableModels(): Promise<ModelInfo[]> {
+    const cached = this.availableModelsCache;
+    if (cached && (Date.now() - cached.at) < ProviderRegistry.AVAILABLE_MODELS_TTL_MS) {
+      return cached.models;
+    }
+    const models = await this.fetchAllAvailableModels();
+    this.availableModelsCache = { models, at: Date.now() };
+    return models;
   }
 
   async fetchAllAvailableModels(): Promise<ModelInfo[]> {

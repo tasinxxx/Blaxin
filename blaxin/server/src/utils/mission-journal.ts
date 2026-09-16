@@ -32,6 +32,7 @@ export type JournalKind =
   | 'ROUTER'
   | 'PLAN'
   | 'DELEGATED'
+  | 'ROUTING'
   | 'ACTION'
   | 'OBSERVATION'
   | 'VERIFICATION'
@@ -101,6 +102,21 @@ export interface JournalEntry {
   replanBudget?: number;
   /** The NEW plan: what changed in the executable strategy (old → new). */
   planChange?: string;
+  /**
+   * REAL model-routing evidence (kind ROUTING): what the task required,
+   * which models were considered/rejected and why, what was selected,
+   * and the routing latency. Never carries API keys or message content.
+   */
+  routing?: {
+    required: string[];
+    candidates?: string[];
+    rejected?: Array<{ candidate: string; reason: string; capability?: string; detail?: string }>;
+    selected?: string;
+    selectionReason?: string;
+    fallback?: string;
+    missingCapability?: string;
+    latencyMs?: number;
+  };
   /** Real failure reason (tool error), when the action failed. */
   failure?: string;
   /** Real recovery action taken after a failure/desync. */
@@ -116,6 +132,19 @@ const MAX_STEP_CACHE = 300;
 
 function newId(): string {
   return `jnl_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 8)}`;
+}
+
+/**
+ * Redact API-key-shaped strings from free text that lands in ROUTING
+ * entries. The routing evidence must never become a secret leak, even
+ * when the user's message contained one.
+ */
+function redactKeys(value: string): string {
+  return value
+    .replace(/sk-(ant-)?[A-Za-z0-9_-]{6,}/g, '[redacted]')
+    .replace(/\bAIza[A-Za-z0-9_-]{10,}/g, '[redacted]')
+    .replace(/\bgsk_[A-Za-z0-9_-]{6,}/g, '[redacted]')
+    .replace(/\bBearer\s+\S+/gi, 'Bearer [redacted]');
 }
 
 function clip(value: unknown, max: number): string | undefined {
@@ -269,6 +298,7 @@ export class MissionJournal {
       case 'confirmation-required': this.onConfirmationRequired(data); break;
       case 'memory-selected':       this.onMemorySelected(data); break;
       case 'browser-session':       this.onBrowserSession(data); break;
+      case 'model-routing':         this.onModelRouting(data); break;
       case 'mission-progress':      this.onMissionProgress(data); break;
       case 'specialist-assigned':   this.onSpecialistAssigned(data); break;
       case 'specialist-result':     this.onSpecialistResult(data); break;
@@ -577,6 +607,53 @@ export class MissionJournal {
       replanBudget: typeof data.replanBudget === 'number' ? data.replanBudget : undefined,
       planChange: planChange ?? clip(data.replanPlanKey, 80),
       detail: clip(data.recoveryDetail, 300),
+    });
+  }
+
+  /**
+   * A REAL model-routing decision (10× adaptive routing): what the task
+   * required, what was rejected and why, what was selected or honestly
+   * blocked. Secrets/keys/message content are never part of the payload
+   * the orchestrator emits, and never read here.
+   */
+  private onModelRouting(data: any): void {
+    if (!data || typeof data !== 'object' || !Array.isArray(data.required)) return;
+    const taskId = data.taskId ? String(data.taskId) : undefined;
+    const routing = {
+      required: (data.required as unknown[]).map((c) => clip(c, 30)).filter(Boolean) as string[],
+      ...(Array.isArray(data.candidates) && data.candidates.length > 0
+        ? { candidates: (data.candidates as unknown[]).map((c) => clip(c, 80)).filter(Boolean).slice(0, 12) as string[] }
+        : {}),
+      ...(Array.isArray(data.rejected) && data.rejected.length > 0
+        ? {
+            rejected: (data.rejected as Array<{ provider?: unknown; model?: unknown; reason?: unknown; capability?: unknown; detail?: unknown }>)
+              .slice(0, 12)
+              .map((r) => ({
+                candidate: clip(`${String(r.provider ?? '?')}/${String(r.model ?? '?')}`, 80) ?? '?',
+                reason: clip(r.reason, 40) ?? 'unknown',
+                ...(r.capability ? { capability: clip(r.capability, 30) } : {}),
+                ...(r.detail ? { detail: clip(r.detail, 160) } : {}),
+              })),
+          }
+        : {}),
+      ...(data.selected ? { selected: clip(`${String(data.selectedProvider ?? '?')}/${String(data.selected ?? '?')}`, 80) } : {}),
+      ...(data.selectionReason ? { selectionReason: clip(data.selectionReason, 160) } : {}),
+      ...(data.fallback ? { fallback: clip(data.fallback, 200) } : {}),
+      ...(data.missingCapability ? { missingCapability: clip(data.missingCapability, 30) } : {}),
+      ...(typeof data.latencyMs === 'number' ? { latencyMs: data.latencyMs } : {}),
+    };
+    // Status is the honest terminal state of THIS decision: BLOCKED when
+    // the task could not be served, COMPLETED when a model was chosen.
+    const blocked = data.blocked === true;
+    this.append({
+      kind: 'ROUTING',
+      status: blocked ? 'BLOCKED' : 'COMPLETED',
+      taskId,
+      objective: clip(redactKeys(String(data.objective ?? '')), 300),
+      detail: blocked
+        ? `routing BLOCKED: ${clip(data.detail, 200) ?? 'no compatible model'}`
+        : `routed to ${clip(`${String(data.selectedProvider ?? '?')}/${String(data.selected ?? '?')}`, 80) ?? 'model'}`,
+      routing,
     });
   }
 
