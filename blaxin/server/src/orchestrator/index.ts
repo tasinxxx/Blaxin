@@ -250,6 +250,11 @@ WEB AUTOMATION — use grounded actions inside the browser:
   verifies the REAL outcome (navigation or the page's own confirmation —
   never "clicked submit"); action=download triggers a download and is
   SUCCESS only when the file REALLY exists on disk with a stable size.
+- PROCESSES: process_control list/inspect read REAL process state; a kill
+  is SUCCESS only when the process is verified GONE by a fresh read-back.
+  NEVER kill by guessing a name or pid: list first, inspect the exact pid,
+  then kill it (force: true escalates to SIGKILL only after SIGTERM was
+  ignored). Killing this server's own pid is refused by design.
 - If a grounded match is refused, re-run action=snapshot — the page
   changed; never guess coordinates over DOM evidence.
 - The browser tool also owns REAL session control with verification:

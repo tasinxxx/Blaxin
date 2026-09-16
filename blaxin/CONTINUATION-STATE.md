@@ -2,15 +2,104 @@
 
 MISSION PHASE: A — LOCKED COMPLETE · PHASE B — IN PROGRESS (parity floor established → 10×)
 CURRENT OBJECTIVE: PHASE B — 10× BLAXIN (see docs/capability-matrix.md; §4 gaps updated after Part B6) · then the PRODUCTION COMPLETION chain (audit → debug → harden → polish → verify → package → release)
-CURRENT SUBTASK: B6 CLOSED (memory-driven procedure learning — promotion + failure accounting + auto-rollback, END-TO-END with the real store); next: next highest-value 10× capability (candidates listed below), then the PRODUCTION COMPLETION chain
-CURRENT STATUS: Part B6 COMPLETE — the memory LEARNING loop is closed. PROMOTION: a fully VERIFIED run with a real multi-step recipe (≥2 completed steps) promotes a reusable procedure via `MemoryRuntimeLike.promoteProcedure` (store-side honesty gates: sensitive-looking content refused, bounded steps ≤10); the advisor surfaces it to similar future objectives with the never-replay-blindly subordination framing. FAILURE ACCOUNTING: a procedure the advisor selected for the current objective is failure-accounted BY REAL RECORD ID (`procedureFailedById`) when the run then fails with real step evidence; repeated failures trip the store's auto-rollback so stale procedures stop surfacing instead of polluting future contexts. Both paths are memory-safe (a throwing store never breaks the task). FULL suite 904 passed / 15 skipped / 0 failed. Client build clean, E2E 9/9.
+CURRENT SUBTASK: B7 CLOSED (process-control verbs: verified list/inspect/kill on the real machine); next: PRODUCTION COMPLETION chain (audit → debug → harden → polish → verify → package → release)
+CURRENT STATUS: Part B7 COMPLETE — `process-control` tool (candidate #1 from B6's NEXT EXACT ACTION): `list` (bounded ≤50-row structured table from REAL `ps` data: pid/cpu%/mem%/stat/uptime/command, sorted by cpu or mem; unparseable ps output = honest FAILURE, never an empty success), `inspect` (real details for one pid; unknown pid = honest FAILURE), `kill` (explicit pid ONLY — SIGTERM with a bounded 4s exit-poll, optional `force` SIGKILL escalation, SUCCESS only when a fresh read-back shows the pid REALLY gone; protected pids 1/2/self REFUSED before any signal; a SIG_IGN process is honestly reported still-running, never a fake kill). Deterministic router: list phrases ("what is running"), pid-specific kill ("kill 1234", "kill pid 7", "force kill 12", "kill -9 9"), pid inspect; kill-by-NAME ("kill the browser") stays with the LLM loop, which the PROCESSES doctrine paragraph instructs to list first. Risk: list/inspect LOW, kill HIGH (argument-level escalation, gate always asks). REAL lesson captured: SIG_IGN ("trap "" TERM") SURVIVES exec — the first probe draft's victim ignored SIGTERM and the TOOL correctly refused the kill; probe fixed, implementation semantics proven right. FULL suite 921 passed / 16 skipped / 0 failed. Client build clean, E2E 9/9, probe 7/7.
 COMPLETED: Parts 15–19 (specialist ownership, recovery/re-plan, mission journal, live desktop + real-Chrome verification, tool verification-in-depth, JARVIS state reflection, mission coordination, budget config surface, branding, documentation) · B2 (computer-use loop, system audio, bulk verbs) · B3 (adaptive routing, system telemetry) · B4 (dedupe, MissionPanel bulk surfacing, computer-control polish) · B5 (browser forms + downloads with verification)
-VERIFIED (fresh this session): server tsc clean · FULL suite **904 passed / 15 skipped / 0 failed** (896 → 904) · memory-procedure-learning **8/8** (promotion, no-trivial-recipes, failed-runs-never-promote, by-id failure accounting, success-no-accounting, END-TO-END auto-rollback + advisor stop-surfacing, future-objective reuse, throwing-store safety) · client tsc -b + vite build clean · E2E 9/9 (32.5s) · bundle-sync guard synced + idempotent · docs updated (capability-matrix §1/§4)
+VERIFIED (fresh this session): server tsc clean · FULL suite **921 passed / 16 skipped / 0 failed** (904 → 921; FOUR consecutive green full runs) · process-control **15/15** (bounded honest list, mem/cpu sort, unparseable-ps FAILURE, cap-50, inspect honesty, verified kill, SIGTERM-ignorer honesty + force escalation, ghost-pid FAILURE, protected-pid refusal with ZERO signals, self-kill refusal, invalid pids, gate pinning, parser contract incl. zombie stat) · process-control-LIVE **1/1** (BLAXIN_LIVE_PROCESSES: real spawn → real ps listing → inspect → verified kill → INDEPENDENT system-ps witness) · direct-router 19/19 + risk-permission (process rows) · probe-process-control **7/7 on the real compiled dist + real OS** (real ps table, real kill verified by tool read-back AND independent ps, SIGTERM-ignorer honest FAILURE then SIGKILL verified, ghost honest, guards with zero signals) · client tsc -b + vite build clean · E2E 9/9 (22.1s) · bundle-sync guard synced + idempotent; BUNDLED dist carries process-control (kill gate true, live import probe) · docs updated (capability-matrix §1/§4)
 BLOCKED (environment, not code): live-LLM round trips (no provider key; no local vision-capable model — deterministic coverage + probes prove the paths); voice PHYSICAL audio output; live keystroke-receiver verification
 KNOWN FAILURES: none open
 KNOWN LIMITATIONS: download verification polls the REAL filesystem (bounded 30s; a genuinely silent filesystem is an honest FAILURE); form_submit's same-document confirmation reads the page's own text (a page that confirms NOTHING and does not navigate is an honest FAILURE — never "we clicked"); select read-back accepts the option's REAL label OR value (both are DOM identity — case never normalized away); fill_form cap is 20 fields (bounded scans only)
-NEXT EXACT ACTION (PHASE B, 10×): pick the next highest-value capability. Candidates, in the order the mission values them: (1) process/app control verbs (list/kill/launch-with-verification) on the real machine; (2) world-monitor equivalent built ONLY from real telemetry (never decorative). Then begin the PRODUCTION COMPLETION chain (Phases 2–17 of the master directive: deep debugging, hardening, UX polish, security, performance, crash/recovery, test matrix, packaging, docs, release audit, GitHub release). When a vision-capable local model OR a provider key becomes available: re-run probe-computer-use.mjs AND probe-model-routing.mjs — the LLM decision stage lights up and the router selects the vision model automatically (both paths are proven and env-adaptive).
+NEXT EXACT ACTION: begin the PRODUCTION COMPLETION chain (Phases 2–17 of the master directive: deep debugging, hardening, UX polish, security, performance, crash/recovery, test matrix, packaging, docs, release audit, GitHub release). All three Phase B 10× candidates from B5's list are now CLOSED (procedure learning B6, process control B7; the telemetry-only world-monitor remains an optional 10× candidate but the honest system panel already covers its real-data core). KNOWN LOAD FLAKE (recorded honestly, not reproducible in 4 detail-captured reruns): one anomalous run at 2.4× wall time (84.7s vs ~36s) saw 5 failures under machine load — same signature as the previously documented brain-integration reconnect-timing load flake; all four normal-timing runs 921/16/0. If it reproduces: capture the failing set, serialize, root-cause. When a vision-capable local model OR a provider key becomes available: re-run probe-computer-use.mjs AND probe-model-routing.mjs — the LLM decision stage lights up and the router selects the vision model automatically (both paths are proven and env-adaptive).
 RELEASE BLOCKERS: v1.4.0 tag remains deferred — it follows the Phase B scope decision (parity-complete release)
+
+---
+
+## SESSION — PROCESS-CONTROL VERBS CLOSED (2026-09-17, PART B7)
+
+Continued the Phase B directive exactly in order (candidate #1 from B6's
+NEXT EXACT ACTION: process/app control verbs). State recovered first (clean
+tree at cfd196b = the verified B6 checkpoint). No architecture changed: the
+new tool rides the existing Tool → riskFor → confirmation-gate → journal
+chain, with the system-audio-style injectable runner seam.
+
+### 1. `tools/process-control.ts` — real verbs, real read-backs
+- `list`: ONE `ps -eo pid=,pcpu=,pmem=,stat=,etimes=,comm=,args=` spawn,
+  parsed into structured rows (position-first parsing; etimes optional —
+  platforms without it still parse correctly; unparseable lines SKIPPED,
+  never fabricated into rows; zero parseable rows = honest FAILURE).
+  Bounded ≤50 rows (default 15), sorted by REAL cpu or mem reading.
+- `inspect`: real details for one pid via `ps -p`; unknown pid is an
+  honest FAILURE ("nothing inspected — never guessed").
+- `kill`: explicit pid ONLY. Hard guards BEFORE any signal: pid 1/2
+  (init/kernel) and this BLAXIN server's own pid are REFUSED with zero
+  signals. Observe-first (captures the REAL command line as evidence +
+  proves the pid existed — a ghost pid is an honest FAILURE). SIGTERM
+  with a bounded 4s exit-poll (fresh `ps -p` each 250ms); `force: true`
+  escalates to SIGKILL with a 2s poll; the read-back is the verdict —
+  a process that ignored the signal is reported STILL RUNNING with the
+  force-retry path named, never a fake kill. Evidence carries pid,
+  real command, signal used, escalated flag, verified flag.
+- Registration: registry + `riskFor` escalation (list/inspect LOW,
+  kill HIGH — argument-level, like filesystem delete) +
+  `requiresConfirmation` (kill only — the gate always asks).
+
+### 2. Deterministic router + doctrine
+- list phrases: "list processes", "what processes are running", "what is
+  running", "processes?" (trailing punctuation tolerated).
+- kill: explicit numeric pid only — "kill 1234", "kill pid 567",
+  "terminate process 42", "kill -9 999" (force), "force kill 12" (force).
+  Name-kills ("kill the browser") and bare "kill" NEVER route — the LLM
+  loop owns them, and the new PROCESSES doctrine paragraph instructs it
+  to list first, inspect the exact pid, then kill.
+- inspect: "inspect pid 7", "what is pid 4242".
+
+### 3. REAL lesson captured (verification-in-depth works)
+The first probe draft staged its plain victim as
+`bash -c 'trap "" TERM; exec sleep 300'` — SIG_IGN survives exec, so that
+victim genuinely ignored SIGTERM and the TOOL honestly refused the kill
+while the probe demanded success. The implementation was RIGHT and the
+probe was wrong: probe fixed (plain `sleep` for the die-on-TERM stage,
+a real bash TERM-handler loop for the stubborn stage), semantics proven.
+Also found and fixed live: `bash -c 'sleep 300'` exec-replaces and hands
+the pid to its child — spawn the target binary directly for a stable pid.
+
+### 4. Tests + runtime proof (evidence, no claims)
+- NEW `process-control.test.ts` (15): bounded honest list + cpu/mem sort,
+  unparseable-ps honest FAILURE, cap-50, inspect honesty, ghost-pid
+  FAILURE, verified kill, SIGTERM-ignorer honesty + escalation ONLY with
+  force, protected-pid refusal with ZERO signals, self-kill refusal,
+  invalid pids, gate pinning, parser contract (incl. a real zombie stat
+  row reported honestly).
+- NEW `process-control-live.test.ts` (env-gated BLAXIN_LIVE_PROCESSES=1,
+  RAN LIVE): real spawn → real ps listing bounds → inspect reads the
+  REAL process → kill verified by the tool AND by an INDEPENDENT system
+  `ps` witness.
+- NEW `scripts/probe-process-control.mjs`: **7/7 PASS** on the real
+  compiled dist + real OS (list reads the real table — 298–318 processes;
+  inspect real sleep; kill verified by tool read-back AND independent ps;
+  stubborn TERM-ignorer honest FAILURE then SIGKILL verified gone; ghost
+  honest; guards with zero signals).
+- Router rows in `direct-router.test.ts` (15 → 19 total per-file tests;
+  28/28 with risk-permission). One REAL router gap caught by the new
+  tests: bare `kill <pid>` did not match (pid/process prefix was
+  mandatory) — fixed in the router, never in the test.
+- One accidental U+200B zero-width space found inside the kill regex
+  (`cat -A` probed) — removed; regex re-pinned green.
+- Server `tsc --noEmit` clean; FULL suite **921 passed / 16 skipped /
+  0 failed** (904 → 921) across FOUR consecutive green runs (one load-
+  flaked run at 2.4× wall time recorded honestly, unreproducible).
+- Client `tsc -b` + `vite build` clean; E2E **9/9 PASS** (22.1s).
+- bundle-sync-guard synced then idempotent; the BUNDLED dist carries
+  process-control (live import probe: kill gate true).
+
+### Honest remaining gaps
+- LLM decision stage in computer-use stays `unverified-fallback` until a
+  vision-capable model exists (unchanged; routing selects one).
+- Voice physical round trip: environment-blocked (unchanged).
+- list is bounded top-N by cpu/mem by design (a full unbounded table is a
+  DoS on the context budget); `inspect` covers exact-pid presence.
+- Windows/macOS process verbs are out of scope for this build (ps/kill
+  are the Linux runtime; the tool reports honest failure elsewhere).
 
 ---
 

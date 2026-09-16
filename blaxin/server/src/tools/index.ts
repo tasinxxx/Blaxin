@@ -12,6 +12,7 @@ import { SearchTool } from './search.js';
 import { SystemInfoTool } from './system-info.js';
 import { SystemAudioTool } from './system-audio.js';
 import { BulkFilesTool } from './bulk-files.js';
+import { ProcessControlTool } from './process-control.js';
 import { logger } from '../utils/logger.js';
 
 export class ToolRegistry {
@@ -30,6 +31,7 @@ export class ToolRegistry {
     this.register(new SystemInfoTool());
     this.register(new SystemAudioTool());
     this.register(new BulkFilesTool());
+    this.register(new ProcessControlTool());
   }
 
   private register(tool: Tool): void {
@@ -139,6 +141,7 @@ const RISK_TIERS: Record<string, RiskTier> = {
   'computer-control': 'MEDIUM',
   'system-audio': 'LOW', // volume get/set is reversible user-scope tuning
   'bulk-files': 'HIGH', // mutates many paths at once — always gated + confirmed
+  'process-control': 'LOW', // list/inspect are read-only; a kill escalates below
 };
 
 const DEFAULT_RISK_TIER: RiskTier = 'MEDIUM';
@@ -172,6 +175,12 @@ export function riskFor(name: string, args: Record<string, unknown>, config?: Ap
     case 'terminal': {
       const command = String(args.command || '');
       if (config && matchesAnyPattern(command, config.agent.confirmationPatterns)) return 'CRITICAL';
+      return base;
+    }
+    case 'process-control': {
+      // Ending a real process is a destructive act on the machine — HIGH
+      // like other destructive verbs; list/inspect stay read-only LOW.
+      if (String(args.action || '') === 'kill') return 'HIGH';
       return base;
     }
     default:

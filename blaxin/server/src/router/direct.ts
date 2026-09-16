@@ -236,6 +236,44 @@ export function classifyDirect(rawMessage: string): DirectAction | null {
     return { tool: 'system-info', args: { info: 'all' }, summary: 'Gathering system information…' };
   }
 
+  // ── Process control (verified list/inspect/kill) ──────────────
+  // Listing is read-only. Kill is routed ONLY with an explicit numeric
+  // pid — "kill the browser" (a name, a guess) stays with the LLM loop,
+  // which is instructed to list first and choose the exact pid. A bare
+  // "kill" with no target is never guessed either.
+  // Trailing sentence punctuation is tolerated on these verb phrases.
+  const pLower = lower.replace(/[?.!]+$/, '').trim();
+  if (
+    pLower === 'list processes' || pLower === 'processes' ||
+    pLower === 'running processes' ||
+    /^(show|list)\s+(me\s+)?(the\s+)?(running\s+)?processes$/.test(pLower) ||
+    /^what\s+processes\s+are\s+running$/.test(pLower) ||
+    /^what('s| is)\s+running$/.test(pLower)
+  ) {
+    return { tool: 'process-control', args: { action: 'list' }, summary: 'Listing running processes…' };
+  }
+  const killMatch = pLower.match(
+    /^(?:force\s+)?(?:kill|terminate|end)\s+(?:(?:pid|process)\s*#?)?(\d{1,7})(?:\s+with\s+force|\s+force)?$|^kill\s+-9\s+(?:pid\s*#?)?(\d{1,7})$/,
+  );
+  if (killMatch) {
+    const pid = Number(killMatch[1] ?? killMatch[2]);
+    if (Number.isInteger(pid) && pid > 0) {
+      const force = /^(?:force\s|.*\s+with\s+force$|.*\s+force$|kill\s+-9)/.test(pLower);
+      return {
+        tool: 'process-control',
+        args: { action: 'kill', pid, ...(force ? { force: true } : {}) },
+        summary: `Killing pid ${pid} (verified exit)…`,
+      };
+    }
+  }
+  const inspectMatch = pLower.match(/^(?:what\s+is\s+|inspect\s+|details\s+(?:of|for)\s+)pid\s*#?(\d{1,7})$/);
+  if (inspectMatch) {
+    const pid = Number(inspectMatch[1]);
+    if (Number.isInteger(pid) && pid > 0) {
+      return { tool: 'process-control', args: { action: 'inspect', pid }, summary: `Inspecting pid ${pid}…` };
+    }
+  }
+
   // ── Browser session control (deterministic, verified) ────────
   // The directive's fast-path list: back / forward / refresh / new tab /
   // close tab / current URL / page title / list tabs. Each is a single

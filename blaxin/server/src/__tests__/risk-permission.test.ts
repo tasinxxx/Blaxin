@@ -35,6 +35,12 @@ describe('riskFor', () => {
     expect(riskFor('browser', { action: 'refresh' })).toBe('MEDIUM');
   });
 
+  it('treats process-control list/inspect as LOW and kill as HIGH', () => {
+    expect(riskFor('process-control', { action: 'list' })).toBe('LOW');
+    expect(riskFor('process-control', { action: 'inspect', pid: 123 })).toBe('LOW');
+    expect(riskFor('process-control', { action: 'kill', pid: 123 })).toBe('HIGH');
+  });
+
   it('escalates destructive filesystem operations to HIGH', () => {
     expect(riskFor('filesystem', { operation: 'read', path: '/tmp/a' })).toBe('MEDIUM');
     expect(riskFor('filesystem', { operation: 'write', path: '/tmp/a' })).toBe('MEDIUM');

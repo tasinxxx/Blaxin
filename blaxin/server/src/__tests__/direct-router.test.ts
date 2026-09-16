@@ -44,6 +44,28 @@ describe('fast-path router: direct actions', () => {
     expect(classifyDirect('unmute')?.args).toMatchObject({ action: 'unmute' });
   });
 
+  it('routes process listing and pid-specific kill to process-control', () => {
+    for (const msg of ['list processes', 'what processes are running', 'what is running', 'show me the running processes', 'processes?']) {
+      const hit = classifyDirect(msg);
+      expect(hit?.tool).toBe('process-control');
+      expect(hit?.args).toMatchObject({ action: 'list' });
+    }
+    // Kill ONLY with an explicit numeric pid (never a guessed name).
+    expect(classifyDirect('kill 1234')?.args).toMatchObject({ action: 'kill', pid: 1234 });
+    expect(classifyDirect('kill pid 567')?.args).toMatchObject({ action: 'kill', pid: 567 });
+    expect(classifyDirect('terminate process 42')?.args).toMatchObject({ action: 'kill', pid: 42 });
+    expect(classifyDirect('kill -9 999')?.args).toMatchObject({ action: 'kill', pid: 999, force: true });
+    expect(classifyDirect('force kill 12')?.args).toMatchObject({ action: 'kill', pid: 12, force: true });
+    // A name-based kill is a guess — stays with the LLM loop.
+    expect(classifyDirect('kill the browser')).toBeNull();
+    expect(classifyDirect('kill chrome')).toBeNull();
+    // Bare kill with no target is never guessed either.
+    expect(classifyDirect('kill')).toBeNull();
+    // Inspect by pid.
+    expect(classifyDirect('what is pid 4242')?.args).toMatchObject({ action: 'inspect', pid: 4242 });
+    expect(classifyDirect('inspect pid 7')?.args).toMatchObject({ action: 'inspect', pid: 7 });
+  });
+
   it('refuses out-of-range or nonsense volume values instead of guessing', () => {
     expect(classifyDirect('set volume to 500')).toBeNull();
     expect(classifyDirect('set volume to -10')).toBeNull();
