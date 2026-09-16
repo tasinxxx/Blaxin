@@ -351,8 +351,21 @@ export function getBatteryTelemetry(now: number = Date.now()): BatteryTelemetry 
     };
   });
 
-  if (batteries.length === 0 && ac === undefined) {
-    return { present: false, acOnline: null, status: null, capacityPercent: null, minutesRemaining: null, powerWatts: null, cycleCount: null, model: null, cells: [] };
+  if (batteries.length === 0) {
+    // No battery at all (pure-AC desktop / docked USB-C PD): present=false
+    // whenever there is no Battery-type supply. AC mains presence is still
+    // reported honestly — an AC-only machine DOES have real mains state.
+    return {
+      present: false,
+      acOnline: ac !== undefined ? num(readUevent(`/sys/class/power_supply/${ac}`).POWER_SUPPLY_ONLINE) === 1 : null,
+      status: null,
+      capacityPercent: null,
+      minutesRemaining: null,
+      powerWatts: null,
+      cycleCount: null,
+      model: null,
+      cells: [],
+    };
   }
 
   const acOnline = ac !== undefined ? num(readUevent(`/sys/class/power_supply/${ac}`).POWER_SUPPLY_ONLINE) === 1 : null;

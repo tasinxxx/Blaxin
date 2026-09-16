@@ -58,6 +58,27 @@ describe('fast-path router: direct actions', () => {
     expect(classifyDirect('organize the files in certainly-not-a-real-dir-xyz')).toBeNull();
   });
 
+  it('routes content-hash dedupe: report (read-only) vs delete modes, real dirs only', () => {
+    expect(classifyDirect(`find duplicate files in ${dir}`)).toMatchObject({
+      tool: 'bulk-files',
+      args: { operation: 'dedupe', mode: 'report', path: dir },
+    });
+    expect(classifyDirect(`check ${dir} for duplicates`)).toMatchObject({
+      tool: 'bulk-files',
+      args: { operation: 'dedupe', mode: 'report', path: dir },
+    });
+    expect(classifyDirect(`dedupe ${dir}`)).toMatchObject({
+      tool: 'bulk-files',
+      args: { operation: 'dedupe', mode: 'report', path: dir },
+    });
+    expect(classifyDirect(`delete duplicate files in ${dir}`)).toMatchObject({
+      tool: 'bulk-files',
+      args: { operation: 'dedupe', mode: 'delete_duplicates', path: dir },
+    });
+    // Non-directory target is refused, never guessed.
+    expect(classifyDirect('find duplicate files in certainly-not-a-real-dir-xyz')).toBeNull();
+  });
+
   it('classifies system info by facet', () => {
     expect(classifyDirect('how much ram do i have')).toMatchObject({ tool: 'system-info', args: { info: 'memory' } });
     expect(classifyDirect('disk usage')).toMatchObject({ tool: 'system-info', args: { info: 'disk' } });

@@ -256,6 +256,114 @@ describe('ComputerControlTool verification-in-depth', () => {
     expect(result.output).toContain('not verified');
     expect(result.data?.verified).toBe(false);
   });
+
+  // ── B4.3 polish: bounds, smooth travel, focus awareness ──────
+
+  it('mouse_click: REFUSES off-screen coordinates before synthesizing input', async () => {
+    const { runner, calls } = makeControlFake((cmd, args) => {
+      if (cmd === 'xdpyinfo') return 'dimensions: 1920x1080 pixels';
+      return '';
+    });
+    const tool = new ComputerControlTool(runner);
+    const result = await tool.execute({ action: 'mouse_click', x: 5000, y: 300 });
+    expect(result.success).toBe(false);
+    expect(result.error).toContain('outside the real screen (1920x1080)');
+    expect(result.data?.grounded).toBe(false);
+    // NO input synthesis happened: no mousemove/click was issued.
+    expect(calls.filter((c) => c.cmd === 'xdotool' && c.args[0] === 'mousemove')).toHaveLength(0);
+    expect(calls.filter((c) => c.cmd === 'xdotool' && c.args[0] === 'click')).toHaveLength(0);
+  });
+
+  it('mouse_move: negative coordinates are refused (bounds-checked)', async () => {
+    const { runner } = makeControlFake((cmd) => (cmd === 'xdpyinfo' ? 'dimensions: 1024x768 pixels' : ''));
+    const tool = new ComputerControlTool(runner);
+    const result = await tool.execute({ action: 'mouse_move', x: -5, y: 100 });
+    expect(result.success).toBe(false);
+    expect(result.error).toContain('outside the real screen');
+  });
+
+  it('mouse actions stay honest when screen bounds are unknown (no fabricated refusal)', async () => {
+    const { runner } = makeControlFake((cmd, args) => {
+      if (cmd === 'xdotool' && args[0] === 'getmouselocation') return 'x:150 y:250 screen:0';
+      return ''; // xdpyinfo fails/absent → bounds unknown
+    });
+    const tool = new ComputerControlTool(runner);
+    const result = await tool.execute({ action: 'mouse_click', x: 150, y: 250 });
+    expect(result.success).toBe(true); // proceeds, honestly not bounds-checked
+    expect(result.data?.boundsChecked).toBe(false);
+  });
+
+  it('smooth travel: long moves interpolate through bounded waypoints and land on target', async () => {
+    const waypoints: Array<{ x: number; y: number }> = [];
+    let current = { x: 0, y: 0 };
+    const { runner } = makeControlFake((cmd, args) => {
+      if (cmd === 'xdpyinfo') return 'dimensions: 1920x1080 pixels';
+      if (cmd === 'xdotool' && args[0] === 'getmouselocation') return `x:${current.x} y:${current.y} screen:0`;
+      if (cmd === 'xdotool' && args[0] === 'mousemove') {
+        current = { x: Number(args[1]), y: Number(args[2]) };
+        waypoints.push({ ...current });
+        return '';
+      }
+      return '';
+    });
+    const tool = new ComputerControlTool(runner);
+    const result = await tool.execute({ action: 'mouse_move', x: 600, y: 0 });
+    expect(result.success).toBe(true);
+    // Bounded waypoint count, intermediate points, correct landing.
+    expect(waypoints.length).toBeGreaterThan(2);
+    expect(waypoints.length).toBeLessThanOrEqual(12);
+    const last = waypoints[waypoints.length - 1];
+    expect(last).toEqual({ x: 600, y: 0 });
+    // Intermediate waypoints are BETWEEN start and target (real path).
+    const mid = waypoints[Math.floor(waypoints.length / 2)];
+    expect(mid.x).toBeGreaterThan(0);
+    expect(mid.x).toBeLessThan(600);
+  });
+
+  it('short moves skip interpolation (no needless waypoints)', async () => {
+    let moves = 0;
+    const { runner } = makeControlFake((cmd, args) => {
+      if (cmd === 'xdotool' && args[0] === 'getmouselocation') return 'x:100 y:100 screen:0';
+      if (cmd === 'xdotool' && args[0] === 'mousemove') { moves++; return ''; }
+      return '';
+    });
+    const tool = new ComputerControlTool(runner);
+    await tool.execute({ action: 'mouse_move', x: 120, y: 110 });
+    expect(moves).toBe(1); // single synchronous move, no interpolation
+  });
+
+  it('type_text: reports the REAL focused window (focus awareness)', async () => {
+    const { runner } = makeControlFake((cmd, args) => {
+      if (cmd === 'xdotool' && args[0] === 'getactivewindow') return 'My Terminal';
+      return '';
+    });
+    const tool = new ComputerControlTool(runner);
+    const result = await tool.execute({ action: 'type_text', text: 'hello' });
+    expect(result.success).toBe(true);
+    expect(result.output).toContain('My Terminal');
+    expect(result.data?.focusedWindow).toBe('My Terminal');
+    expect(result.data?.verified).toBe(false); // receiver still not verified
+  });
+
+  it('key_press: reports the REAL focused window when readable', async () => {
+    const { runner } = makeControlFake((cmd, args) => {
+      if (cmd === 'xdotool' && args[0] === 'getactivewindow') return 'Firefox';
+      return '';
+    });
+    const tool = new ComputerControlTool(runner);
+    const result = await tool.execute({ action: 'key_press', key: 'Return' });
+    expect(result.success).toBe(true);
+    expect(result.data?.focusedWindow).toBe('Firefox');
+  });
+
+  it('key_press: stays honest when the focused window is unreadable', async () => {
+    const { runner } = makeControlFake(() => '');
+    const tool = new ComputerControlTool(runner);
+    const result = await tool.execute({ action: 'key_press', key: 'Return' });
+    expect(result.success).toBe(true);
+    expect(result.data?.focusedWindow).toBeUndefined();
+    expect(result.output).toContain('not verified');
+  });
 });
 
 // ── Clipboard ──────────────────────────────────────────────────

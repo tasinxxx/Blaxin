@@ -142,6 +142,10 @@ const CLASS_PATTERNS: ClassPattern[] = [
       /not found on path/i,
       /launch not verified/i,
       /install one/i,
+      // B4.3 polish: the tool refused an ungrounded coordinate itself —
+      // the REAL screen bounds are the environment, and the coordinates
+      // (not the machine) are what must change.
+      /outside the real screen/i,
     ],
   },
 ];

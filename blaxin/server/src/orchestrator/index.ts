@@ -1310,6 +1310,9 @@ export class AgentOrchestrator {
         state: 'failed',
         error: result.error?.slice(0, 400),
         verification: result.data?.verification,
+        ...(action.tool === 'bulk-files' && result.data && typeof result.data === 'object'
+          ? { resultData: result.data as Record<string, unknown> }
+          : {}),
         stepId: pc.step.id,
         objectiveId: this.objectiveIdFor(pc.step.id),
       });
@@ -2363,6 +2366,12 @@ export class AgentOrchestrator {
       // produced one (browser/computer-control/clipboard/screenshot) — the
       // journal and HUD record HOW the outcome was verified, never a claim.
       verification: result.data?.verification,
+      // The tool's REAL structured aggregate (bulk-files blocks) rides on
+      // the settled event so mission settlement can surface it verbatim.
+      // Bounded: the block itself is small; only bulk verbs carry one.
+      ...(toolName === 'bulk-files' && result.data && typeof result.data === 'object'
+        ? { resultData: result.data as Record<string, unknown> }
+        : {}),
       stepId: step.id,
       objectiveId: this.objectiveIdFor(step.id),
     });

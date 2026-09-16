@@ -11,6 +11,13 @@ type DisplayServer = 'x11' | 'wayland' | 'unknown';
 // prevents nonsense input from reaching xdotool/ydotool.
 const KEY_SAFE_PATTERN = /^[A-Za-z0-9_+\-.]{1,40}$/;
 
+// ── Smooth-travel bounds (polish: real motion, never a jump-cut; and
+// never a click at a point that cannot exist on the real screen) ──
+const SMOOTH_STEP_PX = 60;        // max distance per interpolated waypoint
+const SMOOTH_MAX_WAYPOINTS = 12;  // hard bound: bounded motion, no runaway
+const SMOOTH_WAYPOINT_DELAY_MS = 12;
+const BOUNDS_CACHE_TTL_MS = 30_000;
+
 /**
  * Injectable command runner (verification seam). The default runs the real
  * commands; tests inject fakes to drive honest-success / honest-failure
@@ -27,6 +34,8 @@ export class ComputerControlTool implements Tool {
   description = 'Control the computer: mouse clicks, keyboard input, window management, application launching, and scrolling. Supports both X11 and Wayland.';
 
   private displayServer: DisplayServer = 'unknown';
+  /** Cached real screen geometry (xdpyinfo); re-read after the TTL. */
+  private boundsCache: { w: number; h: number; at: number } | null = null;
 
   definition = {
     type: 'function' as const,
@@ -207,6 +216,11 @@ export class ComputerControlTool implements Tool {
     }
   }
 
+  /** Real cursor position read (same seam as the verification read-back). */
+  private async currentPointer(): Promise<{ x: number; y: number } | null> {
+    return this.readMousePosition();
+  }
+
   private async clickMouse(button = 1): Promise<void> {
     const ds = await this.detectDisplayServer();
     if (ds === 'wayland') {
@@ -234,6 +248,91 @@ export class ComputerControlTool implements Tool {
     }
   }
 
+  /**
+   * REAL screen geometry from xdpyinfo ("dimensions: 1920x1080 pixels").
+   * Cached briefly (one spawn per interaction burst, bounded). Returns
+   * null when unknown (Wayland, xdpyinfo absent) — the caller must stay
+   * honest that the check could not run, never invent a limit.
+   */
+  private async readScreenBounds(): Promise<{ w: number; h: number } | null> {
+    if (this.boundsCache && Date.now() - this.boundsCache.at < BOUNDS_CACHE_TTL_MS) {
+      return { w: this.boundsCache.w, h: this.boundsCache.h };
+    }
+    try {
+      const out = await this.runner('xdpyinfo', [], 3000);
+      const m = /dimensions:\s+(\d+)x(\d+)/.exec(out.stdout || '');
+      if (!m) return null;
+      const w = Number(m[1]);
+      const h = Number(m[2]);
+      if (!Number.isFinite(w) || !Number.isFinite(h) || w <= 0 || h <= 0) return null;
+      this.boundsCache = { w, h, at: Date.now() };
+      return { w, h };
+    } catch {
+      return null;
+    }
+  }
+
+  /**
+   * Grounding precondition: a coordinate outside the REAL screen can
+   * never be a grounded point — clicking there is a random guess. When
+   * the bounds are known, off-screen coordinates are REFUSED before any
+   * input is synthesized. Unknown bounds (no xdpyinfo) stay honest: the
+   * action may proceed, reported as not bounds-checked.
+   */
+  private async checkOnScreen(points: Array<{ x: number; y: number }>): Promise<{ ok: true; checked: boolean; bounds?: { w: number; h: number } } | { ok: false; bounds: { w: number; h: number } }> {
+    const bounds = await this.readScreenBounds();
+    if (!bounds) return { ok: true, checked: false };
+    for (const p of points) {
+      if (p.x < 0 || p.y < 0 || p.x > bounds.w || p.y > bounds.h) {
+        return { ok: false, bounds };
+      }
+    }
+    return { ok: true, checked: true, bounds };
+  }
+
+  /**
+   * REAL smooth cursor travel: interpolate the path from the current
+   * pointer position to the target in bounded waypoints (xdotool --sync
+   * per step, tiny delays) instead of a jump-cut move. Bounded hard:
+   * at most SMOOTH_MAX_WAYPOINTS steps regardless of distance. Falls
+   * back to a single synchronous move when the current position is
+   * unreadable (nothing to interpolate FROM).
+   */
+  private async moveMouseSmooth(x: number, y: number): Promise<void> {
+    const from = await this.readMousePosition();
+    if (!from) {
+      // No honest start point → single synchronous move (still verified
+      // afterwards by the caller's read-back).
+      await this.moveMouse(x, y);
+      return;
+    }
+    const dist = Math.hypot(x - from.x, y - from.y);
+    if (dist <= SMOOTH_STEP_PX) {
+      await this.moveMouse(x, y);
+      return;
+    }
+    const steps = Math.min(SMOOTH_MAX_WAYPOINTS, Math.ceil(dist / SMOOTH_STEP_PX));
+    for (let i = 1; i <= steps; i++) {
+      const wx = Math.round(from.x + ((x - from.x) * i) / steps);
+      const wy = Math.round(from.y + ((y - from.y) * i) / steps);
+      await this.moveMouse(wx, wy);
+      if (i < steps) await new Promise((r) => setTimeout(r, SMOOTH_WAYPOINT_DELAY_MS));
+    }
+  }
+
+  /**
+   * Best-effort REAL active-window read (focus awareness for keyboard
+   * and click actions). Returns null when unavailable — never a guess.
+   */
+  private async readActiveWindow(): Promise<string | null> {
+    try {
+      const name = await this.xdotoolGetActiveWindow();
+      return name || null;
+    } catch {
+      return null;
+    }
+  }
+
   async execute(args: Record<string, unknown>): Promise<ToolResult> {
     const action = args.action as string;
 
@@ -242,7 +341,19 @@ export class ComputerControlTool implements Tool {
         case 'mouse_click': {
           const x = this.num(args.x, 'x');
           const y = this.num(args.y, 'y');
-          await this.moveMouse(x, y);
+          // Grounding precondition (polish): off-screen points are refused
+          // BEFORE any input is synthesized — a click off the real screen
+          // cannot land on anything.
+          const bounds = await this.checkOnScreen([{ x, y }]);
+          if (!bounds.ok) {
+            return {
+              success: false,
+              output: '',
+              error: `Click refused: (${x}, ${y}) is outside the real screen (${bounds.bounds.w}x${bounds.bounds.h}) — refusing an ungrounded click`,
+              data: { requested: { x, y }, screenBounds: bounds.bounds, grounded: false },
+            };
+          }
+          await this.moveMouseSmooth(x, y);
           await this.clickMouse(1);
           // Verification-in-depth: read the REAL pointer position back and
           // compare with what was requested. Exit 0 alone only proves the X
@@ -254,18 +365,27 @@ export class ComputerControlTool implements Tool {
                 success: false,
                 output: '',
                 error: `Click NOT verified: pointer is at (${real.x}, ${real.y}), not the requested (${x}, ${y})`,
-                data: { requested: { x, y }, actual: real },
+                data: { requested: { x, y }, actual: real, boundsChecked: bounds.checked },
               };
             }
-            return { success: true, output: `Clicked at (${x}, ${y}) — verified pointer at (${real.x}, ${real.y})`, data: { requested: { x, y }, actual: real } };
+            return { success: true, output: `Clicked at (${x}, ${y}) — verified pointer at (${real.x}, ${real.y})${bounds.checked ? ' (bounds-checked)' : ''}`, data: { requested: { x, y }, actual: real, boundsChecked: bounds.checked } };
           }
           // No read-back available (e.g. Wayland): honest about what is known.
-          return { success: true, output: `Click requested at (${x}, ${y}) — executed (position read-back unavailable)`, data: { requested: { x, y }, verified: false } };
+          return { success: true, output: `Click requested at (${x}, ${y}) — executed (position read-back unavailable)`, data: { requested: { x, y }, verified: false, boundsChecked: bounds.checked } };
         }
 
         case 'mouse_double_click': {
           const x = this.num(args.x, 'x');
           const y = this.num(args.y, 'y');
+          const bounds = await this.checkOnScreen([{ x, y }]);
+          if (!bounds.ok) {
+            return {
+              success: false,
+              output: '',
+              error: `Double-click refused: (${x}, ${y}) is outside the real screen (${bounds.bounds.w}x${bounds.bounds.h}) — refusing an ungrounded click`,
+              data: { requested: { x, y }, screenBounds: bounds.bounds, grounded: false },
+            };
+          }
           const ds = await this.detectDisplayServer();
           if (ds === 'wayland') {
             await this.ydotoolDoubleClick(x, y);
@@ -289,7 +409,16 @@ export class ComputerControlTool implements Tool {
         case 'mouse_right_click': {
           const x = this.num(args.x, 'x');
           const y = this.num(args.y, 'y');
-          await this.moveMouse(x, y);
+          const bounds = await this.checkOnScreen([{ x, y }]);
+          if (!bounds.ok) {
+            return {
+              success: false,
+              output: '',
+              error: `Right-click refused: (${x}, ${y}) is outside the real screen (${bounds.bounds.w}x${bounds.bounds.h}) — refusing an ungrounded click`,
+              data: { requested: { x, y }, screenBounds: bounds.bounds, grounded: false },
+            };
+          }
+          await this.moveMouseSmooth(x, y);
           await this.clickMouse(3);
           const real = await this.readMousePosition();
           if (real && (Math.abs(real.x - x) > 2 || Math.abs(real.y - y) > 2)) {
@@ -308,7 +437,16 @@ export class ComputerControlTool implements Tool {
         case 'mouse_move': {
           const x = this.num(args.x, 'x');
           const y = this.num(args.y, 'y');
-          await this.moveMouse(x, y);
+          const bounds = await this.checkOnScreen([{ x, y }]);
+          if (!bounds.ok) {
+            return {
+              success: false,
+              output: '',
+              error: `Mouse move refused: (${x}, ${y}) is outside the real screen (${bounds.bounds.w}x${bounds.bounds.h})`,
+              data: { requested: { x, y }, screenBounds: bounds.bounds },
+            };
+          }
+          await this.moveMouseSmooth(x, y);
           const real = await this.readMousePosition();
           if (real && (Math.abs(real.x - x) > 2 || Math.abs(real.y - y) > 2)) {
             return {
@@ -328,6 +466,15 @@ export class ComputerControlTool implements Tool {
           const y = this.num(args.y, 'y');
           const endX = this.num(args.endX, 'endX');
           const endY = this.num(args.endY, 'endY');
+          const bounds = await this.checkOnScreen([{ x, y }, { x: endX, y: endY }]);
+          if (!bounds.ok) {
+            return {
+              success: false,
+              output: '',
+              error: `Drag refused: (${x}, ${y}) → (${endX}, ${endY}) leaves the real screen (${bounds.bounds.w}x${bounds.bounds.h})`,
+              data: { from: { x, y }, requestedEnd: { x: endX, y: endY }, screenBounds: bounds.bounds, grounded: false },
+            };
+          }
           const ds = await this.detectDisplayServer();
           if (ds === 'wayland') {
             await this.ydotoolMove(x, y);
@@ -354,6 +501,11 @@ export class ComputerControlTool implements Tool {
 
         case 'type_text': {
           const text = String(args.text ?? '');
+          // Focus awareness (polish): read the REAL active window before
+          // synthesizing keystrokes. The events always go to whatever the
+          // window manager has focused — knowing WHICH window that is makes
+          // the report honest instead of hopeful. Never guesses.
+          const focused = await this.readActiveWindow();
           const ds = await this.detectDisplayServer();
           if (ds === 'wayland') {
             await this.ydotoolType(text);
@@ -364,7 +516,9 @@ export class ComputerControlTool implements Tool {
           // whether a focused window received them cannot be read back
           // without a display-specific observation (screenshot is the
           // observation layer for that).
-          return { success: true, output: `Typed text (${text.length} chars) — events sent to the focused window (receiver not verified)`, data: { chars: text.length, verified: false } };
+          return focused
+            ? { success: true, output: `Typed text (${text.length} chars) — sent to focused window "${focused}" (receiver not verified)`, data: { chars: text.length, focusedWindow: focused, verified: false } }
+            : { success: true, output: `Typed text (${text.length} chars) — events sent to the focused window (receiver not verified)`, data: { chars: text.length, verified: false } };
         }
 
         case 'key_press':
@@ -373,13 +527,16 @@ export class ComputerControlTool implements Tool {
           if (!KEY_SAFE_PATTERN.test(key)) {
             return { success: false, output: '', error: 'Invalid key name. Use names like "Return", "ctrl+c", "alt+F4".' };
           }
+          const focused = await this.readActiveWindow();
           const ds = await this.detectDisplayServer();
           if (ds === 'wayland') {
             await this.ydotoolKey(key);
           } else {
             await this.xdotoolKey(key);
           }
-          return { success: true, output: `Pressed key: ${key} (event sent; receiver not verified)`, data: { key, verified: false } };
+          return focused
+            ? { success: true, output: `Pressed key: ${key} — sent to focused window "${focused}" (receiver not verified)`, data: { key, focusedWindow: focused, verified: false } }
+            : { success: true, output: `Pressed key: ${key} (event sent; receiver not verified)`, data: { key, verified: false } };
         }
 
         case 'scroll': {

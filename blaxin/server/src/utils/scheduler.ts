@@ -15,8 +15,36 @@
 // =============================================================
 
 import { TaskQueue, QueueTask } from './task-queue.js';
-import { MissionStore, Mission } from './missions.js';
+import { MissionStore, Mission, MissionStepBulk } from './missions.js';
 import { logger } from './logger.js';
+
+/**
+ * Read the REAL aggregate block off a settled bulk tool result (the tool's
+ * own data — never synthesized here). Numeric fields only, bounded:
+ * a malformed or absent block yields undefined (no invented numbers).
+ */
+function bulkBlockOf(d: {
+  toolName?: unknown;
+  resultData?: Record<string, unknown>;
+}): MissionStepBulk | undefined {
+  const tool = typeof d.toolName === 'string' ? d.toolName : '';
+  if (tool !== 'bulk-files') return undefined; // only real bulk results carry one
+  const raw = d.resultData as Record<string, unknown> | undefined;
+  if (!raw || typeof raw !== 'object') return undefined;
+  const num = (v: unknown): number | undefined => (typeof v === 'number' && Number.isFinite(v) ? v : undefined);
+  const op = typeof raw.operation === 'string' ? raw.operation : undefined;
+  const block: MissionStepBulk = {
+    operation: op,
+    affected: num(raw.requested),
+    succeeded: num(raw.verified),
+    failed: num(raw.failed),
+    skipped: typeof raw.skippedByGuard === 'number' ? raw.skippedByGuard
+      : typeof raw.skipped === 'number' ? raw.skipped : undefined,
+    duplicateGroups: num(raw.duplicateGroups),
+  };
+  const hasAny = Object.values(block).some((v) => v !== undefined);
+  return hasAny ? block : undefined;
+}
 
 export interface SchedulerOrchestratorLike {
   isBusy(): boolean;
@@ -71,6 +99,13 @@ export class JarvisScheduler {
   private readonly stepVerification?: (missionId: string, stepId: string) => 'VERIFIED' | 'PARTIAL' | 'UNVERIFIED' | undefined;
   /** Last real agent-state seen while a task was running. */
   private lastState: string = 'idle';
+  /**
+   * The REAL bulk aggregate observed on the running task's settled
+   * bulk tool-execution event (undefined = the task ran no bulk verb).
+   * Captured at settle time — the same evidence channel the journal and
+   * HUD already consume, one source of truth.
+   */
+  private runningTaskBulk: MissionStepBulk | undefined = undefined;
 
   constructor(deps: SchedulerDeps) {
     this.queue = deps.queue;
@@ -105,6 +140,15 @@ export class JarvisScheduler {
     if (event === 'agent-state' && data?.state) {
       this.lastState = data.state;
     }
+    if (event === 'tool-execution' && (data?.state === 'completed' || data?.state === 'failed')) {
+      // A settled bulk action on the RUNNING task: keep its real
+      // aggregate so the step settlement below can carry it. Events
+      // without a running binding are never attributed.
+      if (this.runningTaskId && data.toolName === 'bulk-files') {
+        const block = bulkBlockOf({ toolName: data.toolName, resultData: data.resultData });
+        if (block) this.runningTaskBulk = block;
+      }
+    }
     if (event === 'task-complete') {
       this.onTaskComplete(data);
     }
@@ -114,6 +158,10 @@ export class JarvisScheduler {
     const id = this.runningTaskId;
     if (!id) return;
     this.runningTaskId = null;
+    // Consume the bulk block observed for THIS task (and reset the slot —
+    // the next task starts with no bulk evidence).
+    const bulk = this.runningTaskBulk;
+    this.runningTaskBulk = undefined;
     // Unbind the coordinator BEFORE settling: events after this point no
     // longer belong to the settled step (no stale attribution).
     this.bindCoordinatorTask?.(null);
@@ -156,6 +204,7 @@ export class JarvisScheduler {
           success: true,
           result,
           verification,
+          ...(bulk ? { bulk } : {}),
         });
       }
     }

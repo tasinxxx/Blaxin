@@ -1,17 +1,144 @@
 # BLAXIN Engineering Mission — Continuation State
 
 MISSION PHASE: A — LOCKED COMPLETE · PHASE B — IN PROGRESS (parity floor established → 10×)
-CURRENT OBJECTIVE: PHASE B — 10× BLAXIN (see docs/capability-matrix.md; §4 gaps updated after Part B3)
-CURRENT SUBTASK: 10× items — adaptive model routing CLOSED (Part B3); next: content-hash dedupe verb for bulk-files, mission-panel surfacing of bulk operation results, smooth-motion/focus-aware keyboard polish
-CURRENT STATUS: Part B3 COMPLETE — capability-aware adaptive model routing implemented, tested (15) and live-probed 16/16 on the real runtime (real local inference, honest vision BLOCK, live bounded fallback after a real NETWORK_ERROR). System-awareness telemetry implemented + contract-tested (12). FULL suite 853 passed / 15 skipped / 0 failed. Client build clean, E2E 8/8.
-COMPLETED: Parts 15–19 (specialist ownership, recovery/re-plan, mission journal, live desktop + real-Chrome verification, tool verification-in-depth, JARVIS state reflection, mission coordination, budget config surface, branding, documentation)
-VERIFIED (fresh this audit): server tsc clean · FULL suite 779 passed / 12 skipped / 0 failed · client tsc -b + vite build clean · E2E 8/8 (18.2s) · real-Chrome probe 14/14 PASS · live X desktop 5/5 · real-Chrome CDP 6/6 · bundle-sync guard idempotent, bundled dist carries Parts 16–17 (md5-identical to server/dist) · version 1.4.0 consistent across VERSION/tauri/server/client/APP_VERSION · docs current (README + docs/specialists.md + docs/branding.md) · git tree clean, all work pushed to origin/main
-BLOCKED (environment, not code): live-LLM round trips (no provider key configured on this machine — deterministic model-path tests + probe cover the paths); voice PHYSICAL audio output (browser TTS/STT code is real and feature-detected, but no verifiable audio sink exists in this environment); live keystroke-receiver verification (host has a focused window; injection is honestly reported as "events sent; receiver not verified")
+CURRENT OBJECTIVE: PHASE B — 10× BLAXIN (see docs/capability-matrix.md; §4 gaps updated after Part B4)
+CURRENT SUBTASK: B4 CLOSED (dedupe verb + MissionPanel bulk surfacing + computer-control polish); next: next highest-value 10× capability (candidates listed below)
+CURRENT STATUS: Part B4 COMPLETE — content-hash dedupe verb implemented + tested (22 bulk-files) + runtime-probed 14/14 on the real compiled dist; REAL bulk aggregates flow tool → scheduler → MissionStep → MissionPanel (scheduler tests + E2E proof through the real UI); computer-control polish (screen-bounds grounding, bounded smooth travel, focus awareness). FULL suite 875 passed / 15 skipped / 0 failed. Client build clean, E2E 9/9.
+COMPLETED: Parts 15–19 (specialist ownership, recovery/re-plan, mission journal, live desktop + real-Chrome verification, tool verification-in-depth, JARVIS state reflection, mission coordination, budget config surface, branding, documentation) · B2 (computer-use loop, system audio, bulk verbs) · B3 (adaptive routing, system telemetry) · B4 (dedupe, MissionPanel bulk surfacing, computer-control polish)
+VERIFIED (fresh this session): server tsc clean · FULL suite 875 passed / 15 skipped / 0 failed (853 → 875) · probe-bulk-dedupe 14/14 on real dist · probe-computer-use 9/9 (re-run after polish) · live desktop 5/5 (BLAXIN_LIVE_DESKTOP) · client tsc -b + vite build clean · E2E 9/9 (24.2s, incl. new mission-bulk spec over the real backend+UI) · bundle-sync guard synced + idempotent · docs updated (capability-matrix §1/§4)
+BLOCKED (environment, not code): live-LLM round trips (no provider key; no local vision-capable model — deterministic coverage + probes prove the paths); voice PHYSICAL audio output; live keystroke-receiver verification
 KNOWN FAILURES: none open
-KNOWN LIMITATIONS: mission verification is derived in MissionStore (single source of truth); missions completed before coordination existed read UNVERIFIED; the on-disk .deb predates the Part 18 icons (CI regenerates assets on release; a local rebuild is required before any manual artifact check)
-NEXT EXACT ACTION (PHASE B, 10×): (1) content-hash dedupe verb for bulk-files (real SHA-256 content identity, honest per-item results, HIGH risk tier like the other destructive verbs); (2) mission-panel surfacing of bulk operation results; (3) smooth-motion + focus-aware keyboard polish in computer-control. When a vision-capable local model OR a provider key becomes available: re-run probe-computer-use.mjs AND probe-model-routing.mjs — the LLM decision stage lights up and the router selects the vision model automatically (both paths are proven and env-adaptive).
+KNOWN LIMITATIONS: bulk aggregates live on completed steps only (a retried step shows its LATEST real result — by design, server remains source of truth); MissionPanel renders the newest 3 missions; dedupe refuses directories with >500 candidates rather than hashing a truncated slice (bounded scans only, honest refusal); a root-run machine can read 0o000 files, so the unreadable-file test branches on real readability (both branches pinned)
+NEXT EXACT ACTION (PHASE B, 10×): pick the next highest-value capability. Candidates, in the order the mission values them: (1) browser specialist — form-fill + download flows with per-step verification; (2) memory-driven task learning — prior verified procedures selectable as skills for recurring missions; (3) process/app control verbs (list/kill/launch-with-verification) on the real machine; (4) world-monitor equivalent built ONLY from real telemetry (never decorative). When a vision-capable local model OR a provider key becomes available: re-run probe-computer-use.mjs AND probe-model-routing.mjs — the LLM decision stage lights up and the router selects the vision model automatically (both paths are proven and env-adaptive).
 RELEASE BLOCKERS: v1.4.0 tag remains deferred — it follows the Phase B scope decision (parity-complete release)
 FINAL RELEASE STATUS: NOT STARTED (Phase B)
+
+---
+
+---
+
+## SESSION — B4 CLOSED: CONTENT-HASH DEDUPE + MISSION PANEL BULK SURFACING + COMPUTER-CONTROL POLISH (2026-09-16, PART B4)
+
+Continued the Phase B directive exactly in order (B4.1 → B4.2 → B4.3). State
+recovered first (clean tree at 186fc13 = the verified B3 checkpoint). No
+architecture changed; every addition rides the existing tool → event →
+settlement → panel pipeline. Three test bugs and two probe bugs were found
+and fixed during verification — the production changes below were not
+weakened to pass anything.
+
+### 1. B4.1 — content-hash dedupe verb (bulk-files) — CLOSED
+- `tools/bulk-files.ts`: NEW operation `dedupe` with modes `report`
+  (read-only) and `delete_duplicates`. Identity is REAL SHA-256 of file
+  bytes (streamed in 4 MiB chunks — bounded memory), NEVER the filename.
+  · Size pre-grouping: files whose size matches nobody are never read;
+    per-call hash memo avoids re-hashing a file.
+  · Honest states: unreadable/unhashable files are reported as
+    hashErrors and make the batch an honest FAILURE (never guessed into
+    or out of a group); report SUCCESS with zero groups = a real,
+    verified "no duplicates" answer; delete mode is SUCCESS only when
+    every deletion verified absent AND a keeper exists.
+  · Deterministic keeper: first file in NAME order per group — same
+    input, same survivor, every run. Survivor bytes unchanged.
+  · Never-overwrite preserved (report touches nothing; delete only
+    removes proven content-twins); dotfile/sensitive/protected guards
+    respected (skippedByGuard counted honestly); >500 candidates →
+    honest refusal (a truncated scan could silently miss duplicates).
+  · Verification payload: delete-readback (per-item absence) /
+    content-hash-grouping (report) — rides the standard evidence chain.
+- `router/direct.ts`: "find/show duplicates in <dir>", "check <dir> for
+  duplicates", "dedupe <dir>" → report mode; "delete duplicate files in
+  <dir>" → delete mode; non-real dirs refused, never guessed.
+- Tests: `bulk-files.test.ts` 13 → 22 (content identity incl. an
+  externally-computed SHA-256 compare, deterministic keeper, group
+  deletion with filesystem post-state, dotfile/sensitive survival,
+  permission-failure honesty, gate stays on for both modes).
+- RUNTIME PROOF `scripts/probe-bulk-dedupe.mjs` on the real COMPILED
+  dist: **14/14 PASS** — A/B (different names, identical bytes) group
+  as one duplicate pair, C (different content) excluded, group hash
+  equals the externally computed SHA-256, report touches nothing,
+  delete removes exactly the duplicate (verified absent), post-delete
+  report is honestly empty.
+
+### 2. B4.2 — Mission Panel surfaces REAL bulk results — CLOSED
+- Server (one truth chain, zero fabrication):
+  · `orchestrator/index.ts`: settled tool-execution events for
+    bulk-files now carry `resultData` — the tool's own structured
+    aggregate — on BOTH settle paths (LLM settleResult + direct path).
+  · `utils/scheduler.ts`: captures the REAL bulk block from settled
+    bulk-events while a queue task runs, carries it into settleStep,
+    and resets the slot per task (no cross-task leakage).
+  · `utils/missions.ts`: MissionStep gains a bounded `bulk` block
+    (operation/affected/succeeded/failed/skipped/duplicateGroups)
+    stored verbatim at settlement — persisted, restart-safe.
+- Client: `store.ts` mirrors MissionStepBulk; MissionPanel renders a
+  `mission-bulk` line from those numbers VERBATIM (no client-side
+  computation); failed batches render failure counts in the danger
+  color. SUCCESS/PARTIAL/FAILED/BLOCKED/UNVERIFIED all render from the
+  server's own status fields as before.
+- Tests: `scheduler.test.ts` +4 (bulk block carried onto the step,
+  duplicateGroups for a dedupe step + per-task reset, FAILED batch
+  counts on the step, malformed/non-bulk payloads fabricate nothing).
+- E2E `mission-bulk.spec.ts` (real backend + vite + real Chrome):
+  creates a real mission via REST with a real staged directory, the
+  deterministic fast path routes it to bulk-files, the REAL
+  confirmation gate opens and is approved, the extension folders really
+  appear on disk, and the MissionPanel shows the server's own
+  "organize: 3/3" aggregate on the completed row. **E2E now 9/9.**
+
+### 3. B4.3 — computer-control polish — CLOSED
+- `tools/computer-control.ts`:
+  · Screen-bounds grounding: REAL geometry from xdpyinfo (cached 30s,
+    one spawn per burst). Off-screen click/move/drag points are REFUSED
+    BEFORE any input is synthesized — an off-screen click can never be
+    a grounded action. Unknown bounds (Wayland/absent xdpyinfo) stay
+    honest: the action proceeds reported as not bounds-checked.
+  · Bounded smooth travel: long moves interpolate through ≤12 waypoints
+    (60px steps, tiny delays) between the READ pointer position and the
+    target instead of jump-cutting; short moves stay single-move; a
+    readable start point is required or it falls back to one move.
+  · Focus awareness: type_text/key_press read the REAL active window
+    first and NAME it in the report ("sent to focused window \"X\"") —
+    the receiver is still honestly not-verified, but which window gets
+    the keys is no longer a guess.
+- `orchestrator/recovery-policy.ts`: "outside the real screen" classifies
+  as ENVIRONMENT_BLOCKED (the coordinates must change, not the machine —
+  deterministic recovery correctly declines to retry blind).
+- Tests: `tool-verification.test.ts` 22 → 30 (off-screen refusal with
+  NO input synthesis, negative coords, unknown-bounds honesty,
+  waypoint count/intermediate-points/landing, short-move single step,
+  focused-window named, unreadable-focus fallback).
+- Re-proofs after the change: probe-computer-use **9/9** (the loop
+  still lands, still verifies teardown), live desktop **5/5** on the
+  real display (BLAXIN_LIVE_DESKTOP).
+
+### Regression fix found by the full suite (real bug, not a test weaken)
+- `utils/system-telemetry.ts` getBatteryTelemetry: this X280 exposes AC
+  mains + two USB-C PD sources but NO Battery-type supply. The old code
+  returned present=true (only because an AC entry existed) with an
+  EMPTY cells list — the "present battery with no cells" contradiction
+  pinned by system-awareness.test.ts. Now: present=false whenever no
+  Battery-type supply exists, with AC mains state still reported
+  honestly (an AC-only machine DOES have real mains state). Suite green.
+
+### Verification this phase (evidence, no claims)
+- Server `tsc --noEmit` clean; FULL suite **875 passed / 15 skipped /
+  0 failed** (853 → 875; skips = env-gated live runs).
+- Focused: bulk-files 22/22, direct-router 16/16, scheduler 12/12,
+  tool-verification 30/30, recovery-policy 32/32, system-awareness 12/12.
+- probe-bulk-dedupe **14/14** (real compiled dist, real filesystem).
+- probe-computer-use **9/9**; live desktop **5/5**.
+- Client `tsc -b` + `vite build` clean; E2E **9/9 PASS** (24.2s).
+- bundle-sync-guard: synced then idempotent; bundled dist carries the
+  dedupe verb (live import probe: OK).
+
+### Honest remaining gaps
+- LLM decision stage in computer-use stays `unverified-fallback` until a
+  vision-capable model exists here (routing selects one automatically
+  the moment it appears).
+- Voice physical round trip: environment-blocked (unchanged).
+- MissionPanel bulk line shows the aggregate of the step's LAST real
+  bulk action; per-item detail lives in the journal (by design — the
+  panel stays bounded).
 
 ---
 

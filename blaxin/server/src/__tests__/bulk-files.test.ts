@@ -14,9 +14,10 @@
 // =============================================================
 
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
-import { mkdtempSync, writeFileSync, mkdirSync, rmSync, existsSync, readdirSync, statSync } from 'fs';
+import { mkdtempSync, writeFileSync, mkdirSync, rmSync, existsSync, readdirSync, statSync, chmodSync, readFileSync } from 'fs';
 import { tmpdir } from 'os';
 import { join } from 'path';
+import { createHash } from 'crypto';
 import { BulkFilesTool, isProtectedBulkPath, MAX_BULK_ITEMS } from '../tools/bulk-files.js';
 
 const tool = new BulkFilesTool();
@@ -182,8 +183,173 @@ describe('bulk_files: guards and gates', () => {
   });
 });
 
-// Tiny local helper (no import churn): readFileSync used in one test above.
-import { readFileSync } from 'fs';
+// ── content-hash dedupe (B4.1) ────────────────────────────────
+// Duplicate identity is the file's REAL bytes (SHA-256), never the name.
+// Every case runs against the real filesystem; deletion is verified
+// from the filesystem, never from the tool's own word.
+
+describe('bulk_files: dedupe (content-hash identity)', () => {
+  it('REPORT: A/B (different names, identical content) are duplicates; C (different content) is not', async () => {
+    const work = mkdtempSync(join(tmpdir(), 'blaxin-bulk-dedupe-'));
+    // Same bytes, completely different names — identity is content.
+    writeFileSync(join(work, 'report-final.txt'), 'IDENTICAL-CONTENT-XYZ');
+    writeFileSync(join(work, 'copy (1) of something.bin'), 'IDENTICAL-CONTENT-XYZ');
+    // Distinct content must never be grouped in.
+    writeFileSync(join(work, 'different.txt'), 'totally other bytes');
+    // Same NAME stem but different bytes: names mean nothing.
+    writeFileSync(join(work, 'report-final2.txt'), 'IDENTICAL-CONTENT-XYZ'.replace('XYZ', 'ABC'));
+
+    const r = await tool.execute({ operation: 'dedupe', mode: 'report', path: work });
+    expect(r.success).toBe(true);
+    expect(r.data?.operation).toBe('dedupe');
+    expect(r.data?.mode).toBe('report');
+    expect(r.data?.duplicateGroups).toBe(1);
+    expect(r.data?.duplicatesFound).toBe(1); // A↔B only — C and D are unique
+    const group = (r.data?.groups as Array<{ hash: string; files: string[] }>)[0];
+    expect(group.files.sort()).toEqual(['copy (1) of something.bin', 'report-final.txt']);
+    // Honest read-only claim: nothing modified.
+    expect(existsSync(join(work, 'report-final.txt'))).toBe(true);
+    expect(existsSync(join(work, 'copy (1) of something.bin'))).toBe(true);
+    expect(r.output).toContain('nothing modified');
+    // Hash is REAL sha-256 of the actual content (verified externally against
+    // the crypto module — not an abbreviated or synthetic value).
+    expect(group.hash).toBe(createHash('sha256').update('IDENTICAL-CONTENT-XYZ').digest('hex'));
+    rmSync(work, { recursive: true, force: true });
+  });
+
+  it('REPORT: empty identical-content set is an honest SUCCESS with zero groups', async () => {
+    const work = mkdtempSync(join(tmpdir(), 'blaxin-bulk-dedupe0-'));
+    writeFileSync(join(work, 'a.log'), 'x');
+    writeFileSync(join(work, 'b.log'), 'y');
+    const r = await tool.execute({ operation: 'dedupe', mode: 'report', path: work });
+    expect(r.success).toBe(true);
+    expect(r.data?.duplicateGroups).toBe(0);
+    expect(r.data?.uniqueFiles).toBe(2);
+    expect(r.output).toContain('no duplicate files found');
+    rmSync(work, { recursive: true, force: true });
+  });
+
+  it('REPORT: respects dotfile/protected guards and the pattern filter', async () => {
+    const work = mkdtempSync(join(tmpdir(), 'blaxin-bulk-dedupe-guard-'));
+    writeFileSync(join(work, '.secret'), 'same');
+    writeFileSync(join(work, 'id_rsa'), 'same'); // sensitive name → never touched
+    writeFileSync(join(work, 'n1.log'), 'dup-bytes');
+    writeFileSync(join(work, 'n2.log'), 'dup-bytes');
+    writeFileSync(join(work, 'n3.txt'), 'dup-bytes'); // outside *.log pattern
+    const r = await tool.execute({ operation: 'dedupe', mode: 'report', path: work, pattern: '*.log' });
+    expect(r.success).toBe(true);
+    expect(r.data?.requested).toBe(2); // only the two .log files were candidates
+    expect(r.data?.duplicateGroups).toBe(1);
+    // Untouched by the report (read-only) — and never candidates anyway.
+    expect(existsSync(join(work, '.secret'))).toBe(true);
+    expect(existsSync(join(work, 'id_rsa'))).toBe(true);
+    expect(existsSync(join(work, 'n3.txt'))).toBe(true);
+    rmSync(work, { recursive: true, force: true });
+  });
+
+  it('REPORT: unreadable files are honestly reported, never guessed into groups', async () => {
+    const work = mkdtempSync(join(tmpdir(), 'blaxin-bulk-dedupe-perm-'));
+    writeFileSync(join(work, 'r1.txt'), 'readable twin');
+    writeFileSync(join(work, 'r2.txt'), 'readable twin');
+    writeFileSync(join(work, 'locked.txt'), 'unreadable');
+    chmodSync(join(work, 'locked.txt'), 0o000);
+    try {
+      const r = await tool.execute({ operation: 'dedupe', mode: 'report', path: work });
+      const hashErrors = (r.data?.hashErrors ?? []) as Array<{ file: string; error: string }>;
+      // Running as root would read the file anyway — then there is
+      // nothing to report and the group detection stays honest either way.
+      if (hashErrors.length > 0) {
+        expect(r.success).toBe(false); // unreadable → honest failure, not silent skip
+        expect(hashErrors[0].file).toContain('locked.txt');
+      } else {
+        // Root: every file readable. r1/r2 are twins of each other → the
+        // one honest group; locked.txt is unique. Nothing invented.
+        expect(r.success).toBe(true);
+        expect(r.data?.duplicateGroups).toBe(1);
+        expect(r.data?.duplicatesFound).toBe(1);
+      }
+      expect(existsSync(join(work, 'r1.txt'))).toBe(true);
+      expect(existsSync(join(work, 'r2.txt'))).toBe(true);
+    } finally {
+      chmodSync(join(work, 'locked.txt'), 0o644);
+      rmSync(work, { recursive: true, force: true });
+    }
+  });
+
+  it('DELETE: deletes duplicates, keeps one per group, verifies absence from the REAL filesystem', async () => {
+    const work = mkdtempSync(join(tmpdir(), 'blaxin-bulk-dedupe-del-'));
+    const content = 'DELETE-ME-TWINS-0123456789';
+    writeFileSync(join(work, 'z-keeper.bin'), content);
+    writeFileSync(join(work, 'a-copy.bin'), content);
+    writeFileSync(join(work, 'm-copy.bin'), content);
+    writeFileSync(join(work, 'unique.txt'), 'singular');
+    const r = await tool.execute({ operation: 'dedupe', mode: 'delete_duplicates', path: work });
+    expect(r.success).toBe(true);
+    expect(r.data?.deleted).toBe(2);
+    expect(r.data?.duplicateGroups).toBe(1);
+    // Deterministic keeper: first file in name order survives —
+    // 'a-copy.bin' < 'm-copy.bin' < 'z-keeper.bin'.
+    const kept = (r.data?.items as Array<{ from: string; kept?: boolean }>).filter((i) => i.kept);
+    expect(kept).toHaveLength(1);
+    expect(kept[0].from.endsWith('a-copy.bin')).toBe(true);
+    // Post-state from the FILESYSTEM, not the tool's claim:
+    expect(existsSync(join(work, 'a-copy.bin'))).toBe(true);
+    expect(existsSync(join(work, 'm-copy.bin'))).toBe(false);
+    expect(existsSync(join(work, 'z-keeper.bin'))).toBe(false);
+    expect(existsSync(join(work, 'unique.txt'))).toBe(true);
+    // Keeper content really intact (byte compare against the original).
+    expect(readFileSync(join(work, 'a-copy.bin'), 'utf-8')).toBe(content);
+    rmSync(work, { recursive: true, force: true });
+  });
+
+  it('DELETE: multiple duplicate groups each keep exactly one survivor', async () => {
+    const work = mkdtempSync(join(tmpdir(), 'blaxin-bulk-dedupe-groups-'));
+    writeFileSync(join(work, 'g1.txt'), 'GROUP-ONE');
+    writeFileSync(join(work, 'g1-copy.txt'), 'GROUP-ONE');
+    writeFileSync(join(work, 'g2.txt'), 'GROUP-TWO');
+    writeFileSync(join(work, 'g2-copy.txt'), 'GROUP-TWO');
+    writeFileSync(join(work, 'g2-copy2.txt'), 'GROUP-TWO');
+    const r = await tool.execute({ operation: 'dedupe', mode: 'delete_duplicates', path: work });
+    expect(r.success).toBe(true);
+    expect(r.data?.duplicateGroups).toBe(2);
+    expect(r.data?.deleted).toBe(3);
+    // Name-order keepers: 'g1-copy.txt' < 'g1.txt' and 'g2-copy.txt' < 'g2.txt'
+    // ('-' 0x2D sorts before '.' 0x2E) — the copy names survive.
+    const remain = readdirSync(work).sort();
+    expect(remain).toEqual(['g1-copy.txt', 'g2-copy.txt']);
+    expect(readFileSync(join(work, 'g1-copy.txt'), 'utf-8')).toBe('GROUP-ONE');
+    expect(readFileSync(join(work, 'g2-copy.txt'), 'utf-8')).toBe('GROUP-TWO');
+    rmSync(work, { recursive: true, force: true });
+  });
+
+  it('DELETE never touches unique files or guard-excluded ones (dotfile twin survives)', async () => {
+    const work = mkdtempSync(join(tmpdir(), 'blaxin-bulk-dedupe-safe-'));
+    writeFileSync(join(work, 'one.txt'), 'twin-bytes');
+    writeFileSync(join(work, 'two.txt'), 'twin-bytes');
+    writeFileSync(join(work, '.twin'), 'twin-bytes'); // dotfile: excluded, survives
+    writeFileSync(join(work, 'id_rsa'), 'twin-bytes'); // sensitive: excluded, survives
+    const r = await tool.execute({ operation: 'dedupe', mode: 'delete_duplicates', path: work });
+    expect(r.success).toBe(true);
+    expect(r.data?.skippedByGuard).toBe(2);
+    expect(existsSync(join(work, '.twin'))).toBe(true);
+    expect(existsSync(join(work, 'id_rsa'))).toBe(true);
+    // Exactly one of the two plain twins was removed.
+    const remain = readdirSync(work).filter((f) => f.endsWith('.txt'));
+    expect(remain).toHaveLength(1);
+    rmSync(work, { recursive: true, force: true });
+  });
+
+  it('ALWAYS requires confirmation — including the read-only report (consistent HIGH gate)', () => {
+    expect(tool.requiresConfirmation({ operation: 'dedupe', mode: 'report' })).toBe(true);
+    expect(tool.requiresConfirmation({ operation: 'dedupe', mode: 'delete_duplicates' })).toBe(true);
+  });
+
+  it('protected paths are refused outright (BLOCKED, same as every bulk verb)', async () => {
+    const r = await tool.execute({ operation: 'dedupe', path: '/etc' });
+    expect(r.success).toBe(false);
+    expect(r.error).toContain('protects');
+  });
+});
 
 describe('bulk_files: bounds', () => {
   it('caps the batch at MAX_BULK_ITEMS', async () => {

@@ -624,4 +624,7 @@
   white-space: nowrap; color: var(--jh-text, #c9d6e8);
 }
 .jh-mission-step-s { flex-shrink: 0; font-size: 8px; letter-spacing: 1px; }
+/* Real bulk-result summary (server-derived numbers, verbatim). */
+.jh-mission-bulk { color: var(--jh-dim, #7d8aa5); }
+.jh-mission-bulk-failed { color: var(--jh-danger, #ff5470); }
 .jh-mission-more { font-size: 9px; color: var(--jh-dim, #7d8aa5); padding-left: 8px; }

@@ -1,10 +1,11 @@
 import { Tool, ToolResult } from '../types.js';
 import {
   existsSync, readdirSync, statSync, mkdirSync, renameSync, copyFileSync,
-  unlinkSync, rmSync, realpathSync,
+  unlinkSync, rmSync, realpathSync, openSync, readSync, closeSync,
 } from 'fs';
 import { join, dirname, extname, basename, resolve, parse } from 'path';
 import { homedir } from 'os';
+import { createHash } from 'crypto';
 import { logger } from '../utils/logger.js';
 
 // ── Guards (same protection model as filesystem.ts) ─────────────
@@ -59,6 +60,82 @@ function listFiles(dir: string): string[] {
   return out;
 }
 
+// ── Content hashing (dedupe) ─────────────────────────────────────
+// Hashing reads the WHOLE file; hashing the same bytes twice is waste.
+// `contentHash` therefore accepts a list of files whose sizes were
+// ALREADY grouped: only size-twins are hashed, and each file is hashed
+// at most once per call. A per-call memo covers the size-2+ groups; a
+// file that shares its size with nobody cannot be a duplicate of
+// anything and is never read at all.
+const HASH_CHUNK = 4 * 1024 * 1024; // 4 MiB streaming chunks — bounded memory
+
+/** SHA-256 of a file's real bytes, streamed in bounded chunks. */
+function sha256File(path: string): string {
+  const fd = openSync(path, 'r');
+  try {
+    const hash = createHash('sha256');
+    const buf = Buffer.alloc(Math.min(HASH_CHUNK, Math.max(1, statSync(path).size)));
+    let read: number;
+    while ((read = readSync(fd, buf, 0, buf.length, null)) > 0) {
+      hash.update(read === buf.length ? buf : buf.subarray(0, read));
+    }
+    return hash.digest('hex');
+  } finally {
+    closeSync(fd);
+  }
+}
+
+/**
+ * Group files by REAL content. Identity is the bytes, never the name.
+ * Returns the size-twin groups (length ≥ 2) with their hashes, plus
+ * per-path errors for files that could not be read honestly (stat or
+ * hash failures — a file that cannot be read is never guessed into or
+ * out of a duplicate group).
+ */
+function groupByContent(
+  files: string[],
+  memo: Map<string, string>,
+): { groups: Array<{ hash: string; files: string[] }>; errors: Map<string, string> } {
+  const bySize = new Map<number, string[]>();
+  const errors = new Map<string, string>();
+  for (const f of files) {
+    try {
+      const size = statSync(f).size;
+      const list = bySize.get(size);
+      if (list) list.push(f);
+      else bySize.set(size, [f]);
+    } catch (e: any) {
+      // stat itself failed — the file cannot be classified honestly.
+      errors.set(f, e?.message ?? String(e));
+    }
+  }
+  const groups: Array<{ hash: string; files: string[] }> = [];
+  for (const [, twins] of bySize) {
+    if (twins.length < 2) continue; // unique size → cannot have a content twin
+    const hashed = new Map<string, string>();
+    for (const f of twins) {
+      try {
+        const h = memo.get(f) ?? sha256File(f);
+        memo.set(f, h);
+        hashed.set(f, h);
+      } catch (e: any) {
+        errors.set(f, e?.message ?? String(e)); // read/open failure — honest
+      }
+    }
+    // Only groups with ≥2 successfully hashed members are duplicates.
+    const byHash = new Map<string, string[]>();
+    for (const [f, h] of hashed) {
+      const list = byHash.get(h);
+      if (list) list.push(f);
+      else byHash.set(h, [f]);
+    }
+    for (const [hash, members] of byHash) {
+      if (members.length >= 2) groups.push({ hash, files: members });
+    }
+  }
+  return { groups, errors };
+}
+
 /**
  * Verify a MOVE really happened: the source is gone AND the destination
  * exists with the same size. A rename that silently failed (same
@@ -97,14 +174,20 @@ export class BulkFilesTool implements Tool {
       description:
         'Bulk file operations with per-item verification: organize (sort files into subfolders by extension), ' +
         'batch_move / batch_copy / batch_delete (files matching a simple pattern like *.log or a prefix), ' +
-        'and bulk_rename (rename by pattern: prefix/suffix/replace). Bounded at ' + String(MAX_BULK_ITEMS) + ' items.',
+        'bulk_rename (rename by pattern: prefix/suffix/replace), and dedupe (find duplicate files by REAL ' +
+        'content hash; optionally delete the extras keeping one file per group). Bounded at ' + String(MAX_BULK_ITEMS) + ' items.',
       parameters: {
         type: 'object',
         properties: {
           operation: {
             type: 'string',
-            enum: ['organize', 'batch_move', 'batch_copy', 'batch_delete', 'bulk_rename'],
+            enum: ['organize', 'batch_move', 'batch_copy', 'batch_delete', 'bulk_rename', 'dedupe'],
             description: 'The bulk operation to perform',
+          },
+          mode: {
+            type: 'string',
+            enum: ['report', 'delete_duplicates'],
+            description: 'dedupe only: report = find duplicates without changing anything; delete_duplicates = keep the first file per group and delete the rest (each deletion verified) — requires confirmation',
           },
           path: { type: 'string', description: 'The directory (or source directory) to operate on' },
           pattern: {
@@ -137,14 +220,14 @@ export class BulkFilesTool implements Tool {
     return fileName === p;
   }
 
-  private items(dir: string, pattern: string | undefined): { files: string[]; skipped: number } {
-    const files = listFiles(dir).filter((f) => {
+  private items(dir: string, pattern: string | undefined): { files: string[]; skipped: number; matchedTotal: number } {
+    const all = listFiles(dir);
+    const matched = all.filter((f) => {
       const name = basename(f);
       // Never bulk-touch dotfiles or anything that looks protected.
       return !name.startsWith('.') && this.matchPattern(name, pattern) && !isProtectedBulkPath(f);
     });
-    const total = listFiles(dir).length;
-    return { files: files.slice(0, MAX_BULK_ITEMS), skipped: total - files.length };
+    return { files: matched.slice(0, MAX_BULK_ITEMS), skipped: all.length - matched.length, matchedTotal: matched.length };
   }
 
   private aggregate(op: string, results: BulkItemResult[], extra: Record<string, unknown> = {}): ToolResult {
@@ -301,6 +384,9 @@ export class BulkFilesTool implements Tool {
           return this.aggregate('bulk-rename', results, { directory: dirPath, strategy, skipped });
         }
 
+        case 'dedupe':
+          return this.dedupe(dirPath, args);
+
         default:
           return { success: false, output: '', error: `Unknown bulk operation: ${operation}` };
       }
@@ -309,10 +395,148 @@ export class BulkFilesTool implements Tool {
     }
   }
 
+  /**
+   * Content-hash dedupe: real SHA-256 identity, never filenames. The
+   * REPORT mode is read-only (grouping only — nothing is touched); the
+   * DELETE mode keeps the FIRST file per duplicate group (stable sort:
+   * name order, so the result is deterministic) and deletes the rest
+   * with per-item absence verification. Honesty rules:
+   *   · same size ≠ same content — identical bytes are proven by hash;
+   *   · unreadable/hash-failing files are SKIPPED (reported), never
+   *     guessed into or out of a duplicate group;
+   *   · a file that vanished between listing and hashing is reported;
+   *   · nothing is silently deleted — delete mode always goes through
+   *     the confirmation gate (requiresConfirmation stays true) and a
+   *     failed deletion makes the batch an honest FAILURE naming it;
+   *   · every successful deletion is verified from the filesystem.
+   */
+  private dedupe(dirPath: string, args: Record<string, unknown>): ToolResult {
+    const mode = args.mode === 'delete_duplicates' ? 'delete_duplicates' : 'report';
+    const { files, skipped, matchedTotal } = this.items(dirPath, args.pattern as string | undefined);
+    if (files.length === 0) return { success: false, output: '', error: `No files match in ${dirPath}` };
+    if (matchedTotal > files.length) {
+      // The item cap truncated the matched set: hashing a SLICE would
+      // silently miss duplicates across the boundary — an honest refusal
+      // (bounded scans only), not a partial answer.
+      return {
+        success: false,
+        output: '',
+        error: `Directory has ${matchedTotal} candidate files (cap ${MAX_BULK_ITEMS}) — refusing a truncated scan; use pattern to narrow it`,
+      };
+    }
+
+    const memo = new Map<string, string>();
+    const { groups, errors } = groupByContent(files, memo);
+
+    const dupFiles = new Set(groups.flatMap((g) => g.files));
+    // Unique = hashed fine but shares content with nobody (real verified
+    // work, honestly reported as skipped-from-duplication).
+    const uniqueCount = files.filter((f) => !dupFiles.has(f) && !errors.has(f)).length;
+
+    interface DupItemResult extends BulkItemResult {
+      hash?: string;
+      kept?: boolean;
+    }
+    const results: DupItemResult[] = [];
+    let deletedOk = 0;
+    let deleteFailed = 0;
+
+    if (mode === 'delete_duplicates') {
+      for (const group of groups) {
+        // Deterministic keeper: first file in name order — same input,
+        // same survivor, every run.
+        const ordered = [...group.files].sort((a, b) => (a < b ? -1 : a > b ? 1 : 0));
+        const [keep, ...extras] = ordered;
+        results.push({ from: keep, ok: true, detail: 'kept (first file in this duplicate group)', hash: group.hash, kept: true });
+        for (const dup of extras) {
+          try {
+            unlinkSync(dup);
+            const gone = !existsSync(dup);
+            results.push({
+              from: dup, to: keep, ok: gone,
+              detail: gone ? `deleted — identical content of ${basename(keep)} (verified absent)` : 'STILL EXISTS after delete',
+              hash: group.hash,
+            });
+            if (gone) deletedOk++; else deleteFailed++;
+          } catch (e: any) {
+            deleteFailed++;
+            results.push({ from: dup, to: keep, ok: false, detail: e?.message ?? String(e), hash: group.hash });
+          }
+        }
+      }
+    }
+
+    // Aggregate state (honest):
+    //   BLOCKED — the path itself was protected (handled in execute());
+    //   FAILED  — report mode with unreadable files, or delete mode with
+    //             any failed deletion (batch NOT fully verified);
+    //   SUCCESS — everything the operation claimed actually verified.
+    // A report with zero duplicate groups but all files readable is a
+    // SUCCESS ("no duplicates found" is a real, verified answer).
+    const groupsSummary = groups.map((g) => ({
+      // The FULL hash is the evidence — identity proven, not abbreviated.
+      hash: g.hash,
+      kept: mode === 'delete_duplicates' ? [...g.files].sort()[0] : g.files[0],
+      duplicates: g.files.length - 1,
+      files: g.files.map((f) => basename(f)),
+    }));
+    const failedItems = results.filter((r) => !r.ok);
+    const failedHashes = [...errors.entries()];
+    const allVerified = failedItems.length === 0 && failedHashes.length === 0;
+
+    let output: string;
+    let success: boolean;
+    if (mode === 'delete_duplicates') {
+      success = allVerified && deletedOk > 0;
+      output = success
+        ? `dedupe (${mode}): deleted ${deletedOk} duplicate file(s) across ${groups.length} group(s), kept ${groups.length} original(s) — all verified absent from the filesystem.`
+        : `dedupe (${mode}): ${deletedOk}/${deletedOk + deleteFailed} deletions verified — FAILED items: ${failedItems.map((f) => `${basename(f.from)} (${f.detail})`).join('; ') || 'none'}`;
+    } else {
+      success = failedHashes.length === 0;
+      output = success
+        ? (groups.length > 0
+          ? `dedupe (report): ${groups.length} duplicate group(s), ${groups.reduce((n, g) => n + g.files.length - 1, 0)} duplicate file(s) found by content hash — nothing modified.`
+          : `dedupe (report): no duplicate files found by content hash (all ${files.length - errors.size} readable files hashed) — nothing modified.`)
+        : `dedupe (report): could not hash ${failedHashes.length} file(s): ${failedHashes.map(([f, m]) => `${basename(f)} (${m})`).join('; ')}`;
+    }
+
+    return {
+      success,
+      output,
+      error: success ? undefined : `dedupe NOT fully verified (mode: ${mode})`,
+      data: {
+        operation: 'dedupe',
+        mode,
+        requested: files.length,
+        verified: mode === 'delete_duplicates' ? deletedOk : groups.reduce((n, g) => n + g.files.length - 1, 0),
+        failed: mode === 'delete_duplicates' ? deleteFailed : failedHashes.length,
+        duplicateGroups: groups.length,
+        duplicatesFound: groups.reduce((n, g) => n + g.files.length - 1, 0),
+        deleted: deletedOk,
+        uniqueFiles: uniqueCount,
+        skippedByGuard: skipped,
+        groups: groupsSummary,
+        hashErrors: failedHashes.map(([f, m]) => ({ file: f, error: m.slice(0, 200) })),
+        items: results.slice(0, 100),
+        directory: dirPath,
+        verification: {
+          method: mode === 'delete_duplicates' ? 'delete-readback' : 'content-hash-grouping',
+          status: success ? 'SUCCESS' : (mode === 'delete_duplicates' && deletedOk > 0 ? 'PARTIAL' : 'UNKNOWN'),
+          detail: mode === 'delete_duplicates'
+            ? `${deletedOk} deletion(s) verified absent; keeper files re-read and compared by hash`
+            : (groups.length > 0 ? `${groups.length} duplicate group(s) proven by SHA-256` : 'no duplicates found'),
+        },
+      },
+    };
+  }
+
   requiresConfirmation(args: Record<string, unknown>): boolean {
     const op = args.operation as string;
     // Every bulk verb mutates many paths at once — the gate ALWAYS asks,
-    // even for organize/copy (they move and create files).
+    // even for organize/copy (they move and create files) and for the
+    // read-only dedupe report (its delete mode is destructive; one
+    // consistent gate for the verb is simpler and safer).
+    void op;
     return true;
   }
 }

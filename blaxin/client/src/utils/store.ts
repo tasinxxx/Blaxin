@@ -74,6 +74,18 @@ export interface MissionStep {
   checkpoint?: { completedAt: number; summary: string };
   /** Real per-step verification (mission coordination). */
   verification?: 'VERIFIED' | 'PARTIAL' | 'UNVERIFIED';
+  /** REAL bulk-result summary (server-derived; rendered verbatim). */
+  bulk?: MissionStepBulk;
+}
+
+/** Bounded bulk aggregate — mirrors the server's MissionStepBulk exactly. */
+export interface MissionStepBulk {
+  operation?: string;
+  affected?: number;
+  succeeded?: number;
+  failed?: number;
+  skipped?: number;
+  duplicateGroups?: number;
 }
 
 export interface Mission {

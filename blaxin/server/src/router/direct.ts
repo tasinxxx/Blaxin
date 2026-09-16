@@ -409,6 +409,39 @@ export function classifyDirect(rawMessage: string): DirectAction | null {
     return null;
   }
 
+  // ── Content-hash dedupe (find / delete duplicates by REAL content) ──
+  // Two routes, honestly split: "find …" is the read-only report mode;
+  // "delete/remove …" is the destructive mode (the tool's own
+  // confirmation gate still runs before anything is touched).
+  const dedupeDelete = text.match(/^(?:delete|remove|erase)\s+(?:the\s+)?(?:duplicate|duplicated|extra)\s+(?:files?|copies)\s+(?:in|from|in\s+the\s+)?(.+)$/i)
+    || text.match(/^(?:dedupe|deduplicate)\s+(?:the\s+)?(.+?)\s*\(?delete\)?$/i);
+  if (dedupeDelete) {
+    const target = cleanTrailing(dedupeDelete[1]);
+    if (target && pathKind(target) === 'dir') {
+      return {
+        tool: 'bulk-files',
+        args: { operation: 'dedupe', mode: 'delete_duplicates', path: expandHome(target) },
+        summary: `Deduplicating ${target} by content hash (keeping one file per group)…`,
+      };
+    }
+    return null;
+  }
+  const dedupeFind = text.match(/^(?:find|show|list)\s+(?:me\s+)?(?:the\s+)?(?:duplicate|duplicated)\s+(?:files?|copies)(?:\s+in\s+|\s+in\s+the\s+|\s+in\s+)?(.+)$/i)
+    || text.match(/^(?:find|show|list)\s+(?:me\s+)?(?:the\s+)?duplicates\s+(?:in\s+|in\s+the\s+)?(.+)$/i)
+    || text.match(/^(?:check|scan)\s+(.+?)\s+for\s+duplicates$/i)
+    || text.match(/^dedupe\s+(?:the\s+)?(.+)$/i);
+  if (dedupeFind) {
+    const target = cleanTrailing(dedupeFind[1]);
+    if (target && pathKind(target) === 'dir') {
+      return {
+        tool: 'bulk-files',
+        args: { operation: 'dedupe', mode: 'report', path: expandHome(target) },
+        summary: `Finding duplicate files in ${target} by content hash…`,
+      };
+    }
+    return null;
+  }
+
   // ── List a directory ──────────────────────────────────────────
   const listMatch =
     text.match(/^(list|show)\s+(me\s+)?(the\s+)?(contents|files|directories|dirs|folders|items)\s+(in|of)\s+(.+)$/i) ||

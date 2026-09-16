@@ -98,6 +98,112 @@ describe('scheduler: queue execution', () => {
     scheduler.enqueueUserMessage('hello');
     expect(events.some((e) => e.event === 'queue-updated')).toBe(true);
   });
+
+  it('carries the REAL bulk aggregate onto the settled mission step (no synthesis)', () => {
+    const { queue, missions, orchestrator, scheduler } = setup();
+    missions.create({ objective: 'Organize downloads', steps: ['organize the files by type'] });
+    scheduler.pump();
+    const stepTask = queue.list().find((t) => t.missionId)!;
+
+    // The orchestrator really settled a bulk action while THIS task ran:
+    // a completed tool-execution carrying the tool's own aggregate block.
+    scheduler.onOrchestratorEvent('tool-execution', {
+      toolName: 'bulk-files',
+      state: 'completed',
+      stepId: 'runtime-step-1',
+      resultData: {
+        operation: 'organize-by-extension',
+        requested: 12,
+        verified: 12,
+        failed: 0,
+        skippedByGuard: 2,
+      },
+    });
+    finishRun(scheduler, orchestrator, 'completed');
+
+    const step = missions.get(stepTask.missionId!)!.steps[0];
+    expect(step.status).toBe('completed');
+    expect(step.bulk).toEqual({
+      operation: 'organize-by-extension',
+      affected: 12,
+      succeeded: 12,
+      failed: 0,
+      skipped: 2,
+      duplicateGroups: undefined,
+    });
+  });
+
+  it('carries duplicate-group counts for a dedupe step and resets between tasks', () => {
+    const { queue, missions, orchestrator, scheduler } = setup();
+    missions.create({ objective: 'Clean disk', steps: ['find duplicate files', 'report free space'] });
+    scheduler.pump();
+    const t1 = queue.list().find((t) => t.missionId)!;
+
+    scheduler.onOrchestratorEvent('tool-execution', {
+      toolName: 'bulk-files',
+      state: 'completed',
+      resultData: { operation: 'dedupe', requested: 9, verified: 4, failed: 0, duplicateGroups: 2, skippedByGuard: 1 },
+    });
+    finishRun(scheduler, orchestrator, 'completed');
+    const step1 = missions.get(t1.missionId!)!.steps[0];
+    expect(step1.bulk?.duplicateGroups).toBe(2);
+    expect(step1.bulk?.succeeded).toBe(4);
+
+    // Step 2 runs — a NON-bulk task must not inherit the previous block.
+    const t2 = queue.list().find((t) => t.missionId && t.id !== t1.id)!;
+    expect(t2.status).toBe('running');
+    scheduler.onOrchestratorEvent('tool-execution', {
+      toolName: 'system-info',
+      state: 'completed',
+      resultData: { operation: 'whatever' },
+    });
+    finishRun(scheduler, orchestrator, 'completed');
+    const step2 = missions.get(t1.missionId!)!.steps[1];
+    expect(step2.status).toBe('completed');
+    expect(step2.bulk).toBeUndefined();
+  });
+
+  it('carries a FAILED bulk batch honestly (failed counts on the failed step)', () => {
+    const { queue, missions, orchestrator, scheduler } = setup();
+    missions.create({ objective: 'Risky cleanup', steps: ['delete duplicate files'] });
+    scheduler.pump();
+    const stepTask = queue.list().find((t) => t.missionId)!;
+
+    scheduler.onOrchestratorEvent('tool-execution', {
+      toolName: 'bulk-files',
+      state: 'failed',
+      resultData: { operation: 'dedupe', mode: 'delete_duplicates', requested: 5, verified: 2, failed: 3 },
+    });
+    // The overall task still completes (the agent reported the failed
+    // action honestly and finished) — the step shows the real counts.
+    finishRun(scheduler, orchestrator, 'completed');
+
+    const step = missions.get(stepTask.missionId!)!.steps[0];
+    expect(step.bulk?.failed).toBe(3);
+    expect(step.bulk?.succeeded).toBe(2);
+    expect(step.bulk?.affected).toBe(5);
+  });
+
+  it('never fabricates a bulk block from a malformed or non-bulk payload', () => {
+    const { queue, missions, orchestrator, scheduler } = setup();
+    missions.create({ objective: 'Clean disk', steps: ['organize files'] });
+    scheduler.pump();
+    const stepTask = queue.list().find((t) => t.missionId)!;
+
+    // Malformed resultData and a non-bulk tool: nothing is invented.
+    scheduler.onOrchestratorEvent('tool-execution', {
+      toolName: 'bulk-files',
+      state: 'completed',
+      resultData: 'garbage',
+    });
+    scheduler.onOrchestratorEvent('tool-execution', {
+      toolName: 'filesystem',
+      state: 'completed',
+      resultData: { operation: 'organize-by-extension', requested: 3, verified: 3 },
+    });
+    finishRun(scheduler, orchestrator, 'completed');
+    expect(missions.get(stepTask.missionId!)!.steps[0].bulk).toBeUndefined();
+  });
 });
 
 describe('scheduler: missions', () => {

@@ -23,6 +23,20 @@ export type MissionStatus = 'queued' | 'running' | 'paused' | 'completed' | 'fai
 
 export type MissionStepStatus = 'pending' | 'running' | 'completed' | 'failed' | 'skipped';
 
+/**
+ * Bounded summary of a REAL bulk tool result (bulk-files etc.), carried
+ * on the mission step that executed it. Server-derived only — the client
+ * renders these numbers verbatim and computes nothing of its own.
+ */
+export interface MissionStepBulk {
+  operation?: string;
+  affected?: number;
+  succeeded?: number;
+  failed?: number;
+  skipped?: number;
+  duplicateGroups?: number;
+}
+
 export interface MissionStep {
   id: string;
   description: string;
@@ -31,6 +45,8 @@ export interface MissionStep {
   error?: string;
   startedAt?: number;
   endedAt?: number;
+  /** REAL bulk-result summary (settlement-time, from the tool's own data). */
+  bulk?: MissionStepBulk;
   /** Real checkpoint: when this step finished and what it produced. */
   checkpoint?: {
     completedAt: number;
@@ -258,7 +274,14 @@ export class MissionStore {
   settleStep(
     id: string,
     stepId: string,
-    outcome: { success: boolean; result?: string; error?: string; verification?: 'VERIFIED' | 'PARTIAL' | 'UNVERIFIED' },
+    outcome: {
+      success: boolean;
+      result?: string;
+      error?: string;
+      verification?: 'VERIFIED' | 'PARTIAL' | 'UNVERIFIED';
+      /** REAL bulk aggregate (bulk-files result block) — stored verbatim. */
+      bulk?: MissionStepBulk;
+    },
   ): void {
     this.load();
     const m = this.missions.find((x) => x.id === id);
@@ -273,6 +296,11 @@ export class MissionStore {
       // ON the step — the mission-level aggregation below reads exactly
       // this field, so an ingested level must never be dropped here.
       if (outcome.verification) step.verification = outcome.verification;
+      // REAL bulk aggregate (when the step ran a bulk verb): stored so the
+      // MissionPanel shows the server-derived numbers. Replaced per
+      // settlement — a retried step shows its LATEST real result.
+      if (outcome.bulk) step.bulk = outcome.bulk;
+      else delete step.bulk;
       step.checkpoint = {
         completedAt: Date.now(),
         summary: (outcome.result || step.description).slice(0, 500),
