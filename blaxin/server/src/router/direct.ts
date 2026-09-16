@@ -473,6 +473,28 @@ export function classifyDirect(rawMessage: string): DirectAction | null {
     return null;
   }
 
+  // ── Form submit (deterministic, verified blaxin_web) ──────────
+  // A bare "submit the form" is one unambiguous verified action: press
+  // Enter on the focused field and verify the REAL page outcome. Field
+  // filling itself stays with the LLM loop (values are user intent).
+  if (/^(?:submit|send)\s+(?:the\s+|this\s+|my\s+)?form$/.test(lower) || /^submit$/.test(lower)) {
+    return { tool: 'blaxin_web', args: { action: 'form_submit' }, summary: 'Submitting the form (outcome will be verified)…' };
+  }
+
+  // ── Download trigger (deterministic, filesystem-verified) ─────
+  // "download <link text>" grounds the link on the CURRENT page and
+  // verifies the file REALLY lands on disk. Multi-step phrasings
+  // ("download X from Y", "download and install Z") stay with the LLM.
+  const dlMatch = text.match(/^(?:download|save)\s+(?:the\s+)?(.+)$/i);
+  if (dlMatch) {
+    const target = cleanTrailing(dlMatch[1]);
+    if (target && !isProbablyUrl(target) && target.length <= 120
+      && !/\s+(?:from|to|into|and|then|as)\s+/i.test(target)) {
+      return { tool: 'blaxin_web', args: { action: 'download', target }, summary: `Downloading “${target}” (verified when the file is on disk)…` };
+    }
+    return null;
+  }
+
   // ── YouTube playback / search (grounded + verified blaxin_web) ──
   // "play X on youtube" / "search youtube for X" are unambiguous,
   // high-value browser automations: route them DETERMINISTICALLY to

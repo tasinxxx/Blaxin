@@ -326,6 +326,102 @@ export async function typeIntoSearch(
   `);
 }
 
+// ── Form filling (per-field read-back verification) ──
+// The honest contract: a fill is a CLAIM about element state, so every
+// fill reads the value back from the DOM and reports what is REALLY
+// there. "The setter was called" is never reported as "the field holds
+// the text" (same rule as typeIntoSearch's native-setter dispatch).
+
+export interface FillReadback {
+  /** The fill was dispatched AND the element accepted a value. */
+  ok: boolean;
+  /** The REAL post-fill value read back from the element (never assumed). */
+  value: string;
+  /** For <select>: the selected option's visible text (label matching). */
+  optionText: string | null;
+  reason: string;
+}
+
+export async function fillField(
+  cdp: PageEval,
+  target: GroundedTarget,
+  text: string,
+): Promise<FillReadback> {
+  // Data travels as JS literals (JSON.stringify is always syntactically
+  // safe), NOT inside comments — a value containing `*/` would otherwise
+  // terminate a comment mid-expression and corrupt the evaluation.
+  const raw = await cdp.eval<string>(`
+    (() => {
+      const IDX = ${target.element.index}, WANT = ${JSON.stringify(text)};
+      /* __blaxinFill */
+      const all = document.querySelectorAll('a[href], button, input, textarea, select, [role=button], [role=link], [role=tab], [aria-label]');
+      const el = all[IDX];
+      if (!el || !/^(input|textarea|select)$/i.test(el.tagName)) {
+        return JSON.stringify({ ok: false, value: '', optionText: null, reason: 'element-not-fillable' });
+      }
+      try { el.scrollIntoView({ block: 'center' }); } catch { /* detached */ }
+      el.focus();
+      let applied = true;
+      let optionText = null;
+      if (/^select$/i.test(el.tagName)) {
+        const want = String(WANT);
+        const opts = [...el.options];
+        const opt = opts.find((o) => o.value === want)
+          || opts.find((o) => (o.textContent || '').trim() === want)
+          || opts.find((o) => o.value.toLowerCase() === want.toLowerCase())
+          || opts.find((o) => (o.textContent || '').trim().toLowerCase() === want.toLowerCase());
+        if (!opt) {
+          applied = false;
+        } else {
+          el.value = opt.value;
+          optionText = (opt.textContent || '').trim();
+        }
+      } else {
+        // Native setter so React/Vue value bindings actually observe it.
+        const proto = el.tagName === 'TEXTAREA' ? HTMLTextAreaElement.prototype : HTMLInputElement.prototype;
+        const setter = Object.getOwnPropertyDescriptor(proto, 'value')?.set;
+        if (setter) setter.call(el, WANT); else el.value = WANT;
+      }
+      if (applied) {
+        el.dispatchEvent(new Event('input', { bubbles: true }));
+        el.dispatchEvent(new Event('change', { bubbles: true }));
+      }
+      return JSON.stringify({ ok: applied, value: String(el.value ?? ''), optionText, reason: applied ? 'set' : 'option-not-found' });
+    })()
+  `);
+  return JSON.parse(raw) as FillReadback;
+}
+
+export interface CheckReadback {
+  ok: boolean;
+  /** The REAL post-set checked state read back from the element. */
+  checked: boolean | null;
+  reason: string;
+}
+
+export async function setCheckbox(
+  cdp: PageEval,
+  target: GroundedTarget,
+  checked: boolean,
+): Promise<CheckReadback> {
+  const raw = await cdp.eval<string>(`
+    (() => {
+      const IDX = ${target.element.index}, WANT = ${checked ? 'true' : 'false'};
+      /* __blaxinCheck */
+      const all = document.querySelectorAll('a[href], button, input, textarea, select, [role=button], [role=link], [role=tab], [aria-label]');
+      const el = all[IDX];
+      if (!el || !/^input$/i.test(el.tagName) || !/^(checkbox|radio)$/i.test(String(el.type || ''))) {
+        return JSON.stringify({ ok: false, checked: null, reason: 'element-not-checkable' });
+      }
+      try { el.scrollIntoView({ block: 'center' }); } catch { /* detached */ }
+      el.checked = WANT;
+      el.dispatchEvent(new Event('change', { bubbles: true }));
+      return JSON.stringify({ ok: true, checked: !!el.checked, reason: 'set' });
+    })()
+  `);
+  return JSON.parse(raw) as CheckReadback;
+}
+
 export async function pressEnter(cdp: PageEval): Promise<boolean> {
   return cdp.eval<boolean>(`
     (() => {

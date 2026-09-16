@@ -79,6 +79,26 @@ describe('fast-path router: direct actions', () => {
     expect(classifyDirect('find duplicate files in certainly-not-a-real-dir-xyz')).toBeNull();
   });
 
+  it('routes bare form-submit to the verified blaxin_web action', () => {
+    expect(classifyDirect('submit the form')).toMatchObject({ tool: 'blaxin_web', args: { action: 'form_submit' } });
+    expect(classifyDirect('submit')).toMatchObject({ tool: 'blaxin_web', args: { action: 'form_submit' } });
+    expect(classifyDirect('send form')).toMatchObject({ tool: 'blaxin_web', args: { action: 'form_submit' } });
+    // Filling fields carries user intent (the values) — the LLM loop owns it.
+    expect(classifyDirect('fill the form with my name')).toBeNull();
+  });
+
+  it('routes single-target downloads with disk verification; multi-step phrasing stays with the LLM', () => {
+    expect(classifyDirect('download the quarterly report')).toMatchObject({
+      tool: 'blaxin_web',
+      args: { action: 'download', target: 'quarterly report' },
+    });
+    expect(classifyDirect('save the installer')).toMatchObject({ tool: 'blaxin_web', args: { action: 'download' } });
+    // Multi-step / sourced / URL targets are NOT one unambiguous action.
+    expect(classifyDirect('download the file from dropbox')).toBeNull();
+    expect(classifyDirect('download https://example.com/file.zip')).toBeNull();
+    expect(classifyDirect('download the tool and install it')).toBeNull();
+  });
+
   it('classifies system info by facet', () => {
     expect(classifyDirect('how much ram do i have')).toMatchObject({ tool: 'system-info', args: { info: 'memory' } });
     expect(classifyDirect('disk usage')).toMatchObject({ tool: 'system-info', args: { info: 'disk' } });

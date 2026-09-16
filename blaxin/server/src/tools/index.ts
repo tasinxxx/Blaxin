@@ -163,6 +163,12 @@ export function riskFor(name: string, args: Record<string, unknown>, config?: Ap
       if (action === 'current_url' || action === 'page_title' || action === 'list_tabs') return 'LOW';
       return base;
     }
+    case 'blaxin_web': {
+      // A download lands a file on the real disk — HIGH like other disk
+      // mutations; the rest of the grounded web actions stay MEDIUM.
+      if (String(args.action || '') === 'download') return 'HIGH';
+      return base;
+    }
     case 'terminal': {
       const command = String(args.command || '');
       if (config && matchesAnyPattern(command, config.agent.confirmationPatterns)) return 'CRITICAL';

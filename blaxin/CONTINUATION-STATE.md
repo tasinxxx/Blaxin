@@ -1,17 +1,117 @@
 # BLAXIN Engineering Mission — Continuation State
 
 MISSION PHASE: A — LOCKED COMPLETE · PHASE B — IN PROGRESS (parity floor established → 10×)
-CURRENT OBJECTIVE: PHASE B — 10× BLAXIN (see docs/capability-matrix.md; §4 gaps updated after Part B4)
-CURRENT SUBTASK: B4 CLOSED (dedupe verb + MissionPanel bulk surfacing + computer-control polish); next: next highest-value 10× capability (candidates listed below)
-CURRENT STATUS: Part B4 COMPLETE — content-hash dedupe verb implemented + tested (22 bulk-files) + runtime-probed 14/14 on the real compiled dist; REAL bulk aggregates flow tool → scheduler → MissionStep → MissionPanel (scheduler tests + E2E proof through the real UI); computer-control polish (screen-bounds grounding, bounded smooth travel, focus awareness). FULL suite 875 passed / 15 skipped / 0 failed. Client build clean, E2E 9/9.
-COMPLETED: Parts 15–19 (specialist ownership, recovery/re-plan, mission journal, live desktop + real-Chrome verification, tool verification-in-depth, JARVIS state reflection, mission coordination, budget config surface, branding, documentation) · B2 (computer-use loop, system audio, bulk verbs) · B3 (adaptive routing, system telemetry) · B4 (dedupe, MissionPanel bulk surfacing, computer-control polish)
-VERIFIED (fresh this session): server tsc clean · FULL suite 875 passed / 15 skipped / 0 failed (853 → 875) · probe-bulk-dedupe 14/14 on real dist · probe-computer-use 9/9 (re-run after polish) · live desktop 5/5 (BLAXIN_LIVE_DESKTOP) · client tsc -b + vite build clean · E2E 9/9 (24.2s, incl. new mission-bulk spec over the real backend+UI) · bundle-sync guard synced + idempotent · docs updated (capability-matrix §1/§4)
+CURRENT OBJECTIVE: PHASE B — 10× BLAXIN (see docs/capability-matrix.md; §4 gaps updated after Part B5) · then the PRODUCTION COMPLETION chain (audit → debug → harden → polish → verify → package → release)
+CURRENT SUBTASK: B5 CLOSED (browser form-fill + verified submission + disk-verified downloads); next: next highest-value 10× capability (candidates listed below)
+CURRENT STATUS: Part B5 COMPLETE — `blaxin_web fill_form` (per-field read-back verification over inputs/selects/checkboxes, bounded ≤20 fields, honest option-not-found + no-guess grounding), `form_submit` (REAL outcome verification: observed navigation OR the page's own confirmation text — "clicked submit" is never success evidence), `download` (CDP Browser+Page download routing, filesystem read-back with stable-size verification, HIGH risk tier, expected-filename filter). Deterministic router: bare "submit (the) form" + single-target "download X" (multi-step phrasing stays with the LLM). System prompt doctrine extended (FORMS paragraph). FULL suite 896 passed / 15 skipped / 0 failed. probe-browser-forms **10/10 PASS on real Chrome** (compiled dist). Client build clean, E2E 9/9.
+COMPLETED: Parts 15–19 (specialist ownership, recovery/re-plan, mission journal, live desktop + real-Chrome verification, tool verification-in-depth, JARVIS state reflection, mission coordination, budget config surface, branding, documentation) · B2 (computer-use loop, system audio, bulk verbs) · B3 (adaptive routing, system telemetry) · B4 (dedupe, MissionPanel bulk surfacing, computer-control polish) · B5 (browser forms + downloads with verification)
+VERIFIED (fresh this session): server tsc clean · FULL suite 896 passed / 15 skipped / 0 failed (875 → 896) · probe-browser-forms **10/10 on REAL Chrome** (real navigation, 4/4 field read-backs incl. select-label identity, verified thank-you navigation, honest validation-blocked FAILURE, file verified on disk at 1344 bytes stable, 404 download honest FAILURE, grounding refusal) · cdp-real-browser 6/6 (live layer after cdp changes) · client tsc -b + vite build clean · E2E 9/9 (25.9s) · bundle-sync guard synced + idempotent (bundled dist carries fill_form + verifyPageTransition) · docs updated (capability-matrix §1/§4)
 BLOCKED (environment, not code): live-LLM round trips (no provider key; no local vision-capable model — deterministic coverage + probes prove the paths); voice PHYSICAL audio output; live keystroke-receiver verification
 KNOWN FAILURES: none open
-KNOWN LIMITATIONS: bulk aggregates live on completed steps only (a retried step shows its LATEST real result — by design, server remains source of truth); MissionPanel renders the newest 3 missions; dedupe refuses directories with >500 candidates rather than hashing a truncated slice (bounded scans only, honest refusal); a root-run machine can read 0o000 files, so the unreadable-file test branches on real readability (both branches pinned)
-NEXT EXACT ACTION (PHASE B, 10×): pick the next highest-value capability. Candidates, in the order the mission values them: (1) browser specialist — form-fill + download flows with per-step verification; (2) memory-driven task learning — prior verified procedures selectable as skills for recurring missions; (3) process/app control verbs (list/kill/launch-with-verification) on the real machine; (4) world-monitor equivalent built ONLY from real telemetry (never decorative). When a vision-capable local model OR a provider key becomes available: re-run probe-computer-use.mjs AND probe-model-routing.mjs — the LLM decision stage lights up and the router selects the vision model automatically (both paths are proven and env-adaptive).
+KNOWN LIMITATIONS: download verification polls the REAL filesystem (bounded 30s; a genuinely silent filesystem is an honest FAILURE); form_submit's same-document confirmation reads the page's own text (a page that confirms NOTHING and does not navigate is an honest FAILURE — never "we clicked"); select read-back accepts the option's REAL label OR value (both are DOM identity — case never normalized away); fill_form cap is 20 fields (bounded scans only)
+NEXT EXACT ACTION (PHASE B, 10×): pick the next highest-value capability. Candidates, in the order the mission values them: (1) memory-driven task learning — prior verified procedures selectable as skills for recurring missions; (2) process/app control verbs (list/kill/launch-with-verification) on the real machine; (3) world-monitor equivalent built ONLY from real telemetry (never decorative). Then begin the PRODUCTION COMPLETION chain (Phases 2–17 of the master directive: deep debugging, hardening, UX polish, security, performance, crash/recovery, test matrix, packaging, docs, release audit, GitHub release). When a vision-capable local model OR a provider key becomes available: re-run probe-computer-use.mjs AND probe-model-routing.mjs — the LLM decision stage lights up and the router selects the vision model automatically (both paths are proven and env-adaptive).
 RELEASE BLOCKERS: v1.4.0 tag remains deferred — it follows the Phase B scope decision (parity-complete release)
 FINAL RELEASE STATUS: NOT STARTED (Phase B)
+
+---
+
+## SESSION — BROWSER FORMS + VERIFIED SUBMISSION + DISK-VERIFIED DOWNLOADS (2026-09-16, PART B5)
+
+Continued the Phase B directive exactly in order (candidate #1 from B4's NEXT
+EXACT ACTION, which the production-completion directive's Phase 4 also names).
+State recovered first (clean tree at efcc451 = the verified B4 checkpoint). No
+architecture changed: every addition rides the existing BrowserSession →
+verification → evidence chain, additive to blaxin_web.
+
+### 1. cdp-browser.ts — real form primitives (read-back, never assumed)
+- `fillField(cdp, target, text)`: grounds by snapshot index, native-setter
+  value dispatch (React/Vue bindings observe it), input+change events;
+  <select> matching is EXACT over option value THEN visible label (then
+  case-insensitive fallback); the eval RETURNS the real post-fill value and
+  the selected option's label. Data travels as JS literals (JSON.stringify),
+  NEVER inside comments (a `*/` in a value would corrupt the evaluation).
+- `setCheckbox(cdp, target, checked)`: real checked-state read-back.
+- Honesty rule: "the setter was called" is never "the field holds the text".
+
+### 2. verification.ts — verifyPageTransition (REAL submit outcome)
+- Post-submit the page is polled for observed reality: URL left the origin
+  (navigation = SUCCESS) or the page ITSELF confirms (body text scanned for
+  real confirmation/validation phrases — same-document SUCCESS/FAILURE);
+  silence through the window = FAILURE; unobservable page = UNKNOWN.
+- Found + fixed during real-Chrome probing: a select read-back mismatch
+  (user names the option LABEL "Support", DOM value is "support") — the
+  read-back now accepts the option's real label OR value, both exact DOM
+  identity, case never normalized away. Implementation fix, not a test fix.
+
+### 3. web-agent.ts — fill_form / form_submit / download
+- `fill_form`: ≤20 fields (bounded), per-field ground → fill/check →
+  read-back compare (whitespace-normalized only); checkbox via check flag;
+  per-field ✓/✗ results in the payload; ANY failed field = honest batch
+  FAILURE naming exactly which fields failed and why; optional submit rides
+  the same result (fields + submit outcome, one honest answer).
+- `form_submit`: grounded submit button OR Enter-on-focused-field; the
+  REAL outcome verified via verifyPageTransition; origin URL carried as
+  evidence; never "clicked submit" as success.
+- `download`: CDP download routing into a REAL directory (Browser + Page
+  scoped setDownloadBehavior — some builds only honor one), pre-click
+  directory usability probe via the filesystem tool (read-back verified
+  create), filesystem diff scan (bounded 400 entries) + stable-size
+  read-back verification; expected-filename filter; suggested filename
+  from the real href; SUCCESS only when the file REALLY exists with a
+  stable non-zero size. HIGH risk tier (disk write).
+- REAL runtime bug found + fixed: the post-click `browserSession.invalidate()`
+  closed the DevTools session that OWNS the download routing — on real
+  Chrome the file landed in the default dir (or nowhere) because the
+  behavior override died with the socket. Invalidate removed (a
+  Content-Disposition download does not navigate; acquire() revalidates).
+- Router: "submit (the) form" / "send form" / "submit" → form_submit;
+  "download|save X" → download (single target only; "download X from Y",
+  URLs, "download and install" stay with the LLM loop — never guessed).
+- System prompt doctrine: FORMS paragraph added (fill_form/form_submit/
+  download + their verification semantics).
+
+### 4. Tests + runtime proof (evidence, no claims)
+- NEW `browser-forms-downloads.test.ts` (19): stateful fake DOM (fields
+  really hold values; submits validate really; download click really
+  writes real bytes to the real tmp dir) — full-coverage fill with DOM
+  state assertions, page-mutated read-back mismatch, option-not-found,
+  no-guess grounding, mid-fill unobservability, cap refusal, per-field
+  partial failure honesty, navigation + SPA-confirmation submits,
+  validation-blocked + silent FAILURE, ghost refusals, stable/silent/
+  never-stable download paths, unusable directory, named-file filter,
+  gating policy. Test-fake bug found during authoring: the generated
+  fill/check code is ONE const with TWO declarators (`const IDX = 0,
+  WANT = "…"`), so the fake matched `WANT =` (not `const WANT =`).
+- Router cases (direct-router 16 → 18): submit routes + download route
+  + honest LLM-deferrals. Risk tier pinned via riskFor.
+- RUNTIME PROOF `scripts/probe-browser-forms.mjs` (env-gated
+  BLAXIN_REAL_CHROME=1) on the real COMPILED dist + real headless Chrome
+  + a real loopback form server: **10/10 PASS** — real navigation
+  verified, 4/4 field read-backs (incl. select-label identity), submit
+  navigated to /thank-you VERIFIED with URL evidence, empty-required
+  submit honestly FAILED (Chrome validation), download verified on disk
+  (1344 bytes, stable read-back, real payload content), 404 download
+  honestly FAILED with nothing on disk, grounding refused a ghost link.
+
+### Verification this phase (evidence, no claims)
+- Server `tsc --noEmit` clean; FULL suite **896 passed / 15 skipped /
+  0 failed** (875 → 896; skips = env-gated live runs).
+- Focused: browser-forms-downloads 19/19, direct-router 18/18,
+  web-agent-honesty + browser-nav + browser-flow all green,
+  cdp-real-browser 6/6 (BLAXIN_REAL_CHROME, after the cdp changes).
+- probe-browser-forms **10/10** (real Chrome, real compiled dist).
+- Client `tsc -b` + `vite build` clean; E2E **9/9 PASS** (25.9s).
+- bundle-sync-guard: synced then idempotent; bundled dist carries
+  fill_form + verifyPageTransition (grep-probed).
+
+### Honest remaining gaps
+- LLM decision stage in computer-use stays `unverified-fallback` until a
+  vision-capable model exists here (unchanged; routing selects one
+  automatically the moment it appears).
+- Voice physical round trip: environment-blocked (unchanged).
+- download verification is event-free by design (filesystem is the
+  witness); Browser.downloadWillBegin/downloadProgress events could add
+  per-URL attribution polish, not correctness.
 
 ---
 

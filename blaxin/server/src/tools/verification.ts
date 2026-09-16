@@ -195,7 +195,108 @@ export async function verifyText(
   return { status: 'FAILURE', method: 'body-text-contains', evidence: null, confidence: 0.8, detail: `Text "${text.slice(0, 80)}" not on page (observed ${lastLen} chars, waited ${waitMs}ms)` };
 }
 
-// ── verifyElementVisible ───────────────────────────────────────────
+// ── verifyPageTransition (form-submit / navigation outcomes) ─────
+
+/**
+ * REAL post-submit outcome for form submissions: a submission either
+ * navigates (the URL left the form page — observed, not assumed), stays
+ * on the same document while the page itself CONFIRMS success (validation
+ * message / inline confirmation — read from the live DOM), or fails.
+ * FAILURE requires observed negative evidence; UNKNOWN only when reality
+ * cannot be observed at all. Never a fabricated "the form went through".
+ */
+export async function verifyPageTransition(
+  cdp: PageEval,
+  opts: { originUrl: string; waitMs?: number; pollMs?: number } = { originUrl: '' },
+): Promise<Verification<{ navigated: boolean; url: string | null; successText: string | null }>> {
+  const waitMs = opts.waitMs ?? 6000;
+  const pollMs = opts.pollMs ?? 300;
+  // Phrases a page honestly uses to confirm a submission (case-insensitive
+  // substring scan over the live body text — evidence from the page, not
+  // from us).
+  const SUCCESS_PATTERNS = [
+    'thank you', 'thanks for', 'successfully', 'success', 'submitted',
+    'confirmation', 'message sent', 'message has been sent',
+    'has been received', 'we received', 'received your',
+    'check your email', 'verify your email', 'your request',
+    'your message', 'your submission', 'form has been',
+    'error occurred', 'an error', 'error:', 'failed to',
+  ];
+  const deadline = Date.now() + waitMs;
+  let url: string | null = null;
+  let title: string | null = null;
+  let observedOnce = false;
+  let sawConfirmingText: string | null = null;
+
+  while (Date.now() < deadline) {
+    // Reality check 1: did the URL leave the form page? (observed)
+    try {
+      const loc = await cdp.eval<{ url: string; title: string }>(
+        '(() => ({ url: location.href, title: document.title }))()',
+      );
+      if (loc && typeof loc.url === 'string') {
+        observedOnce = true;
+        url = loc.url;
+        title = loc.title;
+        const sameDoc = urlMatches(url, opts.originUrl);
+        // Reality check 2: same-document confirmations (SPA submission or
+        // validation outcome) — read from the live DOM, never invented.
+        if (sameDoc) {
+          try {
+            const body = await cdp.eval<string | null>('(() => document.body ? document.body.innerText : null)()');
+            if (body) {
+              const low = body.toLowerCase();
+              const hit = SUCCESS_PATTERNS.find((p) => low.includes(p));
+              if (hit) {
+                sawConfirmingText = body
+                  .split('\n')
+                  .map((l) => l.trim())
+                  .find((l) => l.toLowerCase().includes(hit)) ?? hit;
+              }
+              // Failure surfaced IN the DOM beats the silent same-document case.
+              if (low.includes('error') || low.includes('required') || low.includes('invalid')) {
+                return {
+                  status: 'FAILURE', method: 'page-transition',
+                  evidence: { navigated: false, url, successText: sawConfirmingText },
+                  confidence: 0.9,
+                  detail: `Form outcome — the page reports an error (URL ${url})`,
+                };
+              }
+              if (hit) {
+                return {
+                  status: 'SUCCESS', method: 'page-transition',
+                  evidence: { navigated: false, url, successText: sawConfirmingText },
+                  confidence: 0.85,
+                  detail: `Submission confirmed on-page: "${sawConfirmingText}" (URL ${url})`,
+                };
+              }
+            }
+          } catch { /* body unreadable this round — keep polling */ }
+        }
+        if (!sameDoc) {
+          return {
+            status: 'SUCCESS', method: 'page-transition',
+            evidence: { navigated: true, url, successText: null }, confidence: 0.9,
+            detail: `Submission navigated the page: ${url} ("${title}")`,
+          };
+        }
+      }
+    } catch { /* unobservable this round — keep polling */ }
+    await sleep(pollMs);
+  }
+
+  if (!observedOnce) {
+    return {
+      status: 'UNKNOWN', method: 'page-transition', evidence: null, confidence: 0,
+      detail: 'Could not observe the page after submission — outcome unverified',
+    };
+  }
+  return {
+    status: 'FAILURE', method: 'page-transition',
+    evidence: { navigated: false, url, successText: sawConfirmingText }, confidence: 0.85,
+    detail: `URL is ${url} — the submission did not navigate or confirm (waited ${waitMs}ms)`,
+  };
+}
 
 /**
  * A target is verified visible only when it is REALLY grounded in the

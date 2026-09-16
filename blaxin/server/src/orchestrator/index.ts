@@ -240,6 +240,11 @@ WEB AUTOMATION — use grounded actions inside the browser:
   interactive elements → action=click / action=type with a SEMANTIC target
   description (e.g. "Search" button) → verify the result (for YouTube:
   action=verify_playback reports the real video element state).
+- FORMS: action=fill_form fills ALL fields with per-field read-back
+  verification (pass fields=[{target, value, check?}]); action=form_submit
+  verifies the REAL outcome (navigation or the page's own confirmation —
+  never "clicked submit"); action=download triggers a download and is
+  SUCCESS only when the file REALLY exists on disk with a stable size.
 - If a grounded match is refused, re-run action=snapshot — the page
   changed; never guess coordinates over DOM evidence.
 - The browser tool also owns REAL session control with verification:
