@@ -160,11 +160,16 @@ export interface OrchestratorDeps {
  * Layered memory runtime (§20+): persistent failure/environment/episode/
  * procedure stores the agent WRITES real outcomes to and the advisor
  * READS task-relevant slices from. Injectable so tests use temp files.
+ * promoteProcedure/procedureFailedById close the LEARNING loop: verified
+ * workflows become reusable procedures; procedures that fail in the real
+ * environment lose confidence (auto-rollback at the store's threshold).
  */
 export interface MemoryRuntimeLike {
   failure(input: FailureInput): unknown;
   observeEnvironment(input: EnvironmentInput): unknown;
   recordEpisode(input: EpisodeInput): unknown;
+  promoteProcedure?(input: ProcedureInput, verified: boolean): unknown;
+  procedureFailedById?(id: string): unknown;
 }
 
 /** Structural slice of MemoryAdvisor the orchestrator depends on. */
@@ -1115,6 +1120,53 @@ export class AgentOrchestrator {
           source: 'agent',
           ref: step.id,
         });
+      }
+
+      // PROCEDURE PROMOTION (learning loop, closed): a fully VERIFIED run
+      // with a real multi-step recipe becomes a reusable procedure. The
+      // advisor surfaces it to similar future objectives — which must
+      // still observe CURRENT reality (never replay blindly; the
+      // subordination footer already says so). Every honesty gate lives
+      // in the store (sensitive-looking content refused, bounded steps);
+      // unverified/short runs are silent no-ops here.
+      if (runCompleted && !hasFailures && completed.length >= 2) {
+        const steps = completed
+          .map((s) => `${s.toolName ?? 'action'}: ${s.description}`.slice(0, 200))
+          .filter((x): x is string => !!x)
+          .slice(0, 10);
+        if (steps.length >= 2) {
+          try {
+            this.memoryRuntime.promoteProcedure?.({
+              name: userMessage.slice(0, 120),
+              purpose: `Verified workflow for: ${userMessage.slice(0, 200)}`,
+              steps,
+              triggerTags: [...new Set(completed.map((s) => s.toolName).filter((t): t is string => !!t))].slice(0, 6),
+              taskId,
+              source: 'agent',
+              ref: taskId,
+            }, true);
+          } catch (e: any) {
+            logger.warn('orchestrator', `Procedure promotion failed: ${e?.message ?? e}`);
+          }
+        }
+      }
+
+      // PROCEDURE FAILURE ACCOUNTING (learning loop, closed): a procedure
+      // the advisor selected for THIS objective loses confidence when the
+      // run then failed with real step evidence — repeated failures trip
+      // the store's auto-rollback, so a stale procedure stops being
+      // surfaced instead of polluting future contexts forever.
+      const selectedProcedureIds = (this.currentMemoryAdvisory?.selections ?? [])
+        .filter((s) => s.layer === 'procedure')
+        .map((s) => s.id);
+      if (hasFailures && selectedProcedureIds.length > 0) {
+        for (const id of selectedProcedureIds.slice(0, 2)) {
+          try {
+            this.memoryRuntime.procedureFailedById?.(id);
+          } catch (e: any) {
+            logger.warn('orchestrator', `Procedure failure accounting failed: ${e?.message ?? e}`);
+          }
+        }
       }
 
       // ENVIRONMENT: record VERIFIED browser location after navigation —

@@ -700,6 +700,23 @@ class ProceduralMemory {
     return record;
   }
 
+  /**
+   * Record a failure against a procedure by its REAL record id — the
+   * caller (advisor selection) knows the id, not the name. Same honest
+   * accounting + auto-rollback as recordFailure.
+   */
+  recordFailureById(id: string, now = Date.now()): ProcedureRecord | null {
+    const record = this.records.find((r) => r.id === id);
+    if (!record) return null;
+    record.failureCount += 1;
+    record.updatedAt = now;
+    if (record.status === 'active' && record.failureCount >= ROLLBACK_THRESHOLD &&
+        record.failureCount > record.successCount) {
+      this.rollback(record.name, `auto-disabled after ${record.failureCount} failures vs ${record.successCount} successes`, now);
+    }
+    return record;
+  }
+
   /** Reversible: keep the record + evidence, flip status, log the reason. */
   rollback(name: string, reason: string, now = Date.now()): ProcedureRecord | null {
     const record = this.find(name);
@@ -940,6 +957,14 @@ export class LayeredMemory {
   procedureFailed(name: string): ProcedureRecord | null {
     this.load();
     const r = this.procedures.recordFailure(name);
+    if (r) this.persist();
+    return r;
+  }
+
+  /** Failure accounting by REAL procedure id (see ProceduralMemory). */
+  procedureFailedById(id: string): ProcedureRecord | null {
+    this.load();
+    const r = this.procedures.recordFailureById(id);
     if (r) this.persist();
     return r;
   }

@@ -1,16 +1,73 @@
 # BLAXIN Engineering Mission — Continuation State
 
 MISSION PHASE: A — LOCKED COMPLETE · PHASE B — IN PROGRESS (parity floor established → 10×)
-CURRENT OBJECTIVE: PHASE B — 10× BLAXIN (see docs/capability-matrix.md; §4 gaps updated after Part B5) · then the PRODUCTION COMPLETION chain (audit → debug → harden → polish → verify → package → release)
-CURRENT SUBTASK: B5 CLOSED (browser form-fill + verified submission + disk-verified downloads); next: next highest-value 10× capability (candidates listed below)
-CURRENT STATUS: Part B5 COMPLETE — `blaxin_web fill_form` (per-field read-back verification over inputs/selects/checkboxes, bounded ≤20 fields, honest option-not-found + no-guess grounding), `form_submit` (REAL outcome verification: observed navigation OR the page's own confirmation text — "clicked submit" is never success evidence), `download` (CDP Browser+Page download routing, filesystem read-back with stable-size verification, HIGH risk tier, expected-filename filter). Deterministic router: bare "submit (the) form" + single-target "download X" (multi-step phrasing stays with the LLM). System prompt doctrine extended (FORMS paragraph). FULL suite 896 passed / 15 skipped / 0 failed. probe-browser-forms **10/10 PASS on real Chrome** (compiled dist). Client build clean, E2E 9/9.
+CURRENT OBJECTIVE: PHASE B — 10× BLAXIN (see docs/capability-matrix.md; §4 gaps updated after Part B6) · then the PRODUCTION COMPLETION chain (audit → debug → harden → polish → verify → package → release)
+CURRENT SUBTASK: B6 CLOSED (memory-driven procedure learning — promotion + failure accounting + auto-rollback, END-TO-END with the real store); next: next highest-value 10× capability (candidates listed below), then the PRODUCTION COMPLETION chain
+CURRENT STATUS: Part B6 COMPLETE — the memory LEARNING loop is closed. PROMOTION: a fully VERIFIED run with a real multi-step recipe (≥2 completed steps) promotes a reusable procedure via `MemoryRuntimeLike.promoteProcedure` (store-side honesty gates: sensitive-looking content refused, bounded steps ≤10); the advisor surfaces it to similar future objectives with the never-replay-blindly subordination framing. FAILURE ACCOUNTING: a procedure the advisor selected for the current objective is failure-accounted BY REAL RECORD ID (`procedureFailedById`) when the run then fails with real step evidence; repeated failures trip the store's auto-rollback so stale procedures stop surfacing instead of polluting future contexts. Both paths are memory-safe (a throwing store never breaks the task). FULL suite 904 passed / 15 skipped / 0 failed. Client build clean, E2E 9/9.
 COMPLETED: Parts 15–19 (specialist ownership, recovery/re-plan, mission journal, live desktop + real-Chrome verification, tool verification-in-depth, JARVIS state reflection, mission coordination, budget config surface, branding, documentation) · B2 (computer-use loop, system audio, bulk verbs) · B3 (adaptive routing, system telemetry) · B4 (dedupe, MissionPanel bulk surfacing, computer-control polish) · B5 (browser forms + downloads with verification)
-VERIFIED (fresh this session): server tsc clean · FULL suite 896 passed / 15 skipped / 0 failed (875 → 896) · probe-browser-forms **10/10 on REAL Chrome** (real navigation, 4/4 field read-backs incl. select-label identity, verified thank-you navigation, honest validation-blocked FAILURE, file verified on disk at 1344 bytes stable, 404 download honest FAILURE, grounding refusal) · cdp-real-browser 6/6 (live layer after cdp changes) · client tsc -b + vite build clean · E2E 9/9 (25.9s) · bundle-sync guard synced + idempotent (bundled dist carries fill_form + verifyPageTransition) · docs updated (capability-matrix §1/§4)
+VERIFIED (fresh this session): server tsc clean · FULL suite **904 passed / 15 skipped / 0 failed** (896 → 904) · memory-procedure-learning **8/8** (promotion, no-trivial-recipes, failed-runs-never-promote, by-id failure accounting, success-no-accounting, END-TO-END auto-rollback + advisor stop-surfacing, future-objective reuse, throwing-store safety) · client tsc -b + vite build clean · E2E 9/9 (32.5s) · bundle-sync guard synced + idempotent · docs updated (capability-matrix §1/§4)
 BLOCKED (environment, not code): live-LLM round trips (no provider key; no local vision-capable model — deterministic coverage + probes prove the paths); voice PHYSICAL audio output; live keystroke-receiver verification
 KNOWN FAILURES: none open
 KNOWN LIMITATIONS: download verification polls the REAL filesystem (bounded 30s; a genuinely silent filesystem is an honest FAILURE); form_submit's same-document confirmation reads the page's own text (a page that confirms NOTHING and does not navigate is an honest FAILURE — never "we clicked"); select read-back accepts the option's REAL label OR value (both are DOM identity — case never normalized away); fill_form cap is 20 fields (bounded scans only)
-NEXT EXACT ACTION (PHASE B, 10×): pick the next highest-value capability. Candidates, in the order the mission values them: (1) memory-driven task learning — prior verified procedures selectable as skills for recurring missions; (2) process/app control verbs (list/kill/launch-with-verification) on the real machine; (3) world-monitor equivalent built ONLY from real telemetry (never decorative). Then begin the PRODUCTION COMPLETION chain (Phases 2–17 of the master directive: deep debugging, hardening, UX polish, security, performance, crash/recovery, test matrix, packaging, docs, release audit, GitHub release). When a vision-capable local model OR a provider key becomes available: re-run probe-computer-use.mjs AND probe-model-routing.mjs — the LLM decision stage lights up and the router selects the vision model automatically (both paths are proven and env-adaptive).
+NEXT EXACT ACTION (PHASE B, 10×): pick the next highest-value capability. Candidates, in the order the mission values them: (1) process/app control verbs (list/kill/launch-with-verification) on the real machine; (2) world-monitor equivalent built ONLY from real telemetry (never decorative). Then begin the PRODUCTION COMPLETION chain (Phases 2–17 of the master directive: deep debugging, hardening, UX polish, security, performance, crash/recovery, test matrix, packaging, docs, release audit, GitHub release). When a vision-capable local model OR a provider key becomes available: re-run probe-computer-use.mjs AND probe-model-routing.mjs — the LLM decision stage lights up and the router selects the vision model automatically (both paths are proven and env-adaptive).
 RELEASE BLOCKERS: v1.4.0 tag remains deferred — it follows the Phase B scope decision (parity-complete release)
+
+---
+
+## SESSION — MEMORY-DRIVEN PROCEDURE LEARNING CLOSED (2026-09-17, PART B6)
+
+Continued the Phase B directive exactly in order (candidate #1 from B5's NEXT
+EXACT ACTION). State recovered first (clean tree at d065dff = the verified B5
+checkpoint, plus the B6 WIP already in flight: layers.ts + orchestrator diff
++ the new test). The loop was designed and the remaining work was finishing,
+verifying, and documenting it.
+
+### 1. The learning loop (orchestrator → memory, one honest chain)
+- PROMOTION (`orchestrator/index.ts`): when a run completes with NO failed
+  steps and a real multi-step recipe (≥2 completed steps, bounded ≤10), the
+  orchestrator calls `memoryRuntime.promoteProcedure(..., verified=true)` —
+  name from the objective (bounded 120), purpose, REAL step strings
+  (`tool: description`), trigger tags from the tools that REALLY ran
+  (deduped, ≤6). Store-side honesty gates unchanged (sensitive-looking
+  content refused, bounded). Unverified/short runs are silent no-ops —
+  never a fabricated recipe.
+- FAILURE ACCOUNTING BY ID (`memory/layers.ts`): NEW
+  `recordFailureById` / `procedureFailedById` — the caller (advisor
+  selection) knows the REAL record id, not the name. Same honest accounting
+  + auto-rollback as `recordFailure` (threshold 2 AND failures > successes).
+- LOOP CLOSURE: `MemoryRuntimeLike` gains optional `promoteProcedure` /
+  `procedureFailedById` (backward compatible). After a FAILED run, every
+  procedure the advisor selected for THIS objective (≤2) is failure-
+  accounted; repeated failures trip auto-rollback and the advisor stops
+  surfacing the procedure — stale memory stops polluting future contexts.
+- MEMORY SAFETY: both paths are try/catch-wrapped with a warn log — a
+  throwing store can never break a task (same rule as all memory paths).
+
+### 2. Tests + verification (evidence, no claims)
+- NEW `memory-procedure-learning.test.ts` (8): verified multi-step promotion
+  with REAL steps/tags; single-tool run does NOT promote (no trivial
+  recipes); failed run never promotes; advisor-selected procedure
+  failure-accounted BY REAL ID; success never failure-accounted; END-TO-END
+  with the REAL store — two failed runs auto-rollback the procedure, the
+  version history carries the honest reason, and `advisor.advise()` no
+  longer surfaces it; a future similar objective SEES the promoted
+  procedure (v1, never-replay-blindly framing); throwing promotion path
+  never breaks the task (no error event, agent-message still emitted).
+- Server `tsc --noEmit` clean; FULL suite **904 passed / 15 skipped /
+  0 failed** (896 → 904).
+- Client `tsc -b` + `vite build` clean; E2E **9/9 PASS** (32.5s).
+- bundle-sync-guard: synced then idempotent.
+- docs updated: capability-matrix §1 (Memory row) + §4 (new CLOSED row).
+
+### Honest remaining gaps
+- LLM decision stage in computer-use stays `unverified-fallback` until a
+  vision-capable model exists (unchanged; routing selects one automatically).
+- Voice physical round trip: environment-blocked (unchanged).
+- Procedure promotion is orchestrator-side only (deterministic fast path
+  included via settleResult's shared completion); per-specialist delegation
+  does not promote separate procedures (the mission journal already carries
+  that evidence).
+
 FINAL RELEASE STATUS: NOT STARTED (Phase B)
 
 ---
