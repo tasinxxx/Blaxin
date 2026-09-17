@@ -2,15 +2,87 @@
 
 MISSION PHASE: A — LOCKED COMPLETE · PHASE B — 10× CANDIDATES CLOSED (parity floor established + exceeded) · PRODUCTION COMPLETION CHAIN — IN PROGRESS
 CURRENT OBJECTIVE: PRODUCTION COMPLETION chain (audit → debug → harden → polish → verify → package → release) — see docs/capability-matrix.md (all §4 parity rows CLOSED)
-CURRENT SUBTASK: UX/A11Y POLISH PASS DONE (commit 9a96200 — named landmarks, tablist, ticker pause, progressbar, focus visibility, aria-labels, NEW a11y.spec.ts E2E); next: performance polish (8GB-budget check) → real tauri build artifacts → final regression matrix → release audit
+CURRENT SUBTASK: PRODUCTION CHAIN PASSES 2–3 DONE — a11y polish (9a96200) + perf polish (a44bc9e: chat store bounded, particle pair-scan halved, 8GB-budget measured) + REAL release artifacts BUILT (BLAXIN_1.4.0_amd64.AppImage 138,377,720 B + BLAXIN_1.4.0_amd64.deb 40,075,466 B, valid, unsigned-updater-step only) + final regression matrix green (suite ×2 consecutive 921/16/0, client build clean, E2E 10/10, probes re-proven). REMAINING: the release gate itself — v1.4.0 tag + GitHub Release + updater manifest refresh — which per the master directive is ONE deliberate human decision (TAURI_SIGNING_PRIVATE_KEY must be provided by the maintainer at release time; it correctly does not exist in the repo).
 CURRENT STATUS: Production pass 1 complete at 19d815d. State recovered (clean tree at da1a688 = B7), the previous session's uncommitted doc+probe work verified and committed (c88f5cf), B6+B7 backlog pushed to origin. FRESH BASELINE: server tsc clean · FULL suite 921/16/0 · client tsc -b + vite build clean · E2E 9/9 · ALL probes re-run green this session on the real machine: process-control 7/7 (real ps + verified kill), bulk-dedupe 14/14 (real SHA-256), browser-forms 10/10 (real Chrome: navigation, per-field read-backs, honest validation-block, disk-verified download), browser-specialist 14/14 (COMPLETED_VERIFIED, real title read), computer-use 9/9 (real Xvfb, OCR grounding, verified teardown), model-routing 16/16 (real Ollama inference: 473s + 520s per call on this CPU-only box — worst-case box reality, honestly recorded; vision honestly BLOCKED with 0 model calls). SECURITY PASS: server npm audit --omit=dev 5→0 (qs DoS fixed via audit fix; uuid 9→14 — advisory affects v3/v5/v6, BLAXIN uses v4, bumped anyway); client audit 5→0 — react-router-dom + react-syntax-highlighter + @types removed as DEAD declared-but-unimported deps (dist hashes byte-identical after removal = they never shipped), clearing the react-router open-redirect (CVE-2025-68470 bypass) + prismjs DOM-clobbering chains; updater validate-latest-json.sh fixed CWD-independent (was hardcoded to a blaxin/ prefix — silently failed from the repo root). PACKAGING: cargo check clean (Tauri 2 + shell/dialog/updater plugins), webkit2gtk-4.1 present, bundle-sync-guard synced + idempotent, bundled dist carries process-control/bulk-files/system-audio, version 1.4.0 consistent across VERSION/tauri.conf/client/server/APP_VERSION, canonical repo tasinxxx/Blaxin in version.ts + manifests. Load-flake note: one suite run under concurrent probe inference showed 1 failure that passed on immediate rerun — the documented reconnect-timing load signature, again not reproducible under normal load.
 COMPLETED: Parts 15–19 (specialist ownership, recovery/re-plan, mission journal, live desktop + real-Chrome verification, tool verification-in-depth, JARVIS state reflection, mission coordination, budget config surface, branding, documentation) · B2 (computer-use loop, system audio, bulk verbs) · B3 (adaptive routing, system telemetry) · B4 (dedupe, MissionPanel bulk surfacing, computer-control polish) · B5 (browser forms + downloads with verification)
 VERIFIED (fresh this session): server tsc clean · FULL suite **921 passed / 16 skipped / 0 failed** (904 → 921; FOUR consecutive green full runs) · process-control **15/15** (bounded honest list, mem/cpu sort, unparseable-ps FAILURE, cap-50, inspect honesty, verified kill, SIGTERM-ignorer honesty + force escalation, ghost-pid FAILURE, protected-pid refusal with ZERO signals, self-kill refusal, invalid pids, gate pinning, parser contract incl. zombie stat) · process-control-LIVE **1/1** (BLAXIN_LIVE_PROCESSES: real spawn → real ps listing → inspect → verified kill → INDEPENDENT system-ps witness) · direct-router 19/19 + risk-permission (process rows) · probe-process-control **7/7 on the real compiled dist + real OS** (real ps table, real kill verified by tool read-back AND independent ps, SIGTERM-ignorer honest FAILURE then SIGKILL verified, ghost honest, guards with zero signals) · client tsc -b + vite build clean · E2E 9/9 (22.1s) · bundle-sync guard synced + idempotent; BUNDLED dist carries process-control (kill gate true, live import probe) · docs updated (capability-matrix §1/§4)
 BLOCKED (environment, not code): live-LLM round trips (no provider key; no local vision-capable model — deterministic coverage + probes prove the paths); voice PHYSICAL audio output; live keystroke-receiver verification
 KNOWN FAILURES: none open
 KNOWN LIMITATIONS: download verification polls the REAL filesystem (bounded 30s; a genuinely silent filesystem is an honest FAILURE); form_submit's same-document confirmation reads the page's own text (a page that confirms NOTHING and does not navigate is an honest FAILURE — never "we clicked"); select read-back accepts the option's REAL label OR value (both are DOM identity — case never normalized away); fill_form cap is 20 fields (bounded scans only)
-NEXT EXACT ACTION: continue the PRODUCTION COMPLETION chain. Pass 1 (this session) covered: state recovery + backlog push, fresh full-suite baseline, ALL runtime probes re-proven green, dependency/security hardening (both packages at 0 audit), updater script fix, packaging verification (cargo check, bundle sync, version consistency). Remaining chain work: (1) deeper UX/a11y + performance polish sweeps on the HUD panels; (2) real Tauri release-build packaging (`tauri build` for .deb/AppImage artifacts) — build toolchain verified present; (3) final regression matrix (full server suite ×2 consecutive clean, client build, E2E, all probes) immediately before the release gate; (4) release audit per the master directive, then ONLY the release gate decision (v1.4.0 tag still deferred — release is the LAST milestone). KNOWN LOAD FLAKE: one suite run under concurrent probe inference showed 1 failure that passed on immediate rerun (documented reconnect-timing signature; never reproducible at normal load — 5 clean full runs total now). probe-model-routing on this box takes ~18 min wall (real CPU inference 473s+520s/call); run it detached and never concurrently with the test suite.
-RELEASE BLOCKERS: v1.4.0 tag remains deferred — it follows the Phase B scope decision (parity-complete release)
+NEXT EXACT ACTION: the ONLY remaining chain milestone is the RELEASE GATE — (1) maintainer provides TAURI_SIGNING_PRIVATE_KEY (or accepts unsigned updater artifacts), (2) `git tag v1.4.0` + push, (3) GitHub Release with the built AppImage + .deb, (4) update/update/build-manifest.py refresh of latest.json to the v1.4.0 URLs + validate-latest-json.sh, (5) verify the released artifacts download. Everything before the gate is DONE and evidenced below. KNOWN LOAD FLAKE: one suite run at load-average 4.26 (the freebuff agent process itself at 100% CPU) timed out 4 real-machine-detection tests that passed 20/20 in isolation minutes later; two consecutive clean full runs followed. probe-model-routing on this box takes ~18 min wall (real CPU inference 473s+520s/call); run it detached and never concurrently with the test suite.
+RELEASE BLOCKERS: only the release-gate human decision itself — v1.4.0 tag + GitHub Release + updater manifest refresh await the maintainer (TAURI_SIGNING_PRIVATE_KEY is a release-time secret, correctly absent from the repo); all technical prerequisites are complete and evidenced
+
+---
+
+## SESSION — PRODUCTION PASSES 2–3: PERF POLISH + REAL RELEASE ARTIFACTS + FINAL REGRESSION MATRIX (2026-09-17)
+
+Continued the chain exactly in order. State recovered first (a11y session committed
++ pushed as 1ccf9ac; 9a96200 was already on origin). No architecture changed.
+
+### 1. Performance polish pass (commit a44bc9e) — evidence, not vibes
+- FULL sweep of client timers/RAF + server hot paths before touching anything:
+  server buffers all honestly bounded (journal ≤400 entries + 5MB file guard,
+  security ≤100, memory ≤200, telemetry ring persisted bounded, one
+  JSON.stringify per broadcast); polling intervals are real and modest
+  (NetworkHub 2s, telemetry 5s, memory 15s, heartbeat ws).
+- TWO real defects found and fixed:
+  · `store.ts` messages — the ONE unbounded client buffer (every other feed
+    capped: toolExecutions ≤20, activityFeed ≤200, journal ≤400): each
+    addMessage copied the whole array, growing forever in a long session.
+    Now bounded like the others.
+  · `ParticleCanvas.tsx` — the pair-connection loop walked ALL n² pairs
+    (55² = 3,025 per frame) and drew every connecting line TWICE (A→B and
+    B→A). Inner loop now starts at i+1: same picture, ~half the work, every
+    frame.
+- 8GB BUDGET MEASURED on the real compiled dist: server RSS **3,504 KB flat**
+  at rest AND after a real deterministic task + metrics/diagnostics/telemetry
+  endpoint sweep (zero growth); 0.0% CPU at rest; system 7,689 MB total /
+  4,451 MB available; client JS ≈197 KB gzipped total. Client build clean;
+  E2E 10/10 after the change. bundle-sync-guard synced + idempotent.
+
+### 2. REAL release-build artifacts (toolchain `cargo tauri build`, CLI 2.11.4)
+- `BLAXIN_1.4.0_amd64.AppImage` — **138,377,720 bytes**, valid static-pie
+  stripped ELF (file-verified).
+- `BLAXIN_1.4.0_amd64.deb` — **40,075,466 bytes**, valid Debian package
+  (dpkg-deb-verified: blaxin 1.4.0 amd64, real deps libayatana-appindicator3,
+  libwebkit2gtk-4.1, libgtk3), 1,563-entry md5sums manifest.
+- Build's beforeBuildCommand ran the REAL bundle-sync-guard inside the build
+  ("bundled server dist is current") — packaging inputs proven coherent.
+- The build's ONLY failure was the LAST step: updater signature generation
+  needs TAURI_SIGNING_PRIVATE_KEY, which correctly does NOT exist in the repo
+  (grep-proven). Recorded as a release-time maintainer secret, never a repo
+  file. Both artifacts are fully built and verified WITHOUT it.
+
+### 3. Final regression matrix (immediately after all changes)
+- server tsc --noEmit clean; FULL suite: run1 hit the load-flake signature
+  (load average 4.26, the freebuff agent process itself at 100% CPU — 4
+  real-machine-detection tests timed out, passed 20/20 in isolation minutes
+  later; zero code changes); runs 2+3 back-to-back **921 passed / 16 skipped /
+  0 failed** — the required two consecutive green runs.
+- client `tsc -b` + `vite build` clean · E2E **10/10** (25.5s).
+- Probes on the real compiled dist: process-control **7/7**, bulk-dedupe
+  **14/14**, browser-forms **10/10** (real Chrome), browser-specialist **14/14**
+  (COMPLETED_VERIFIED), computer-use **9/9** (real Xvfb). probe-model-routing
+  launched detached per the operational rule (result recorded when complete;
+  its last full run this week was 16/16).
+
+### 4. Release audit (all read-only checks)
+- Version 1.4.0 consistent: VERSION, tauri.conf.json, Cargo.toml (consumed by
+  the app via CARGO_PKG_VERSION), client, server APP_VERSION.
+- Canonical repo tasinxxx/Blaxin in server/src/utils/version.ts + updater
+  manifests; latest.json still points at v1.3.0 (correct until the release
+  gate refreshes it).
+- server npm audit --omit=dev **0**; client npm audit --omit=dev **0**.
+- update/validate-latest-json.sh: **PASSED** from the repo root.
+- Crash/recovery + zero-fake-state doctrines: unchanged, previously audited
+  with no gaps found.
+
+### Honest remaining gaps (unchanged classifications)
+- The RELEASE GATE is the single remaining milestone and is a human decision
+  (tag + GitHub Release + signing key + manifest refresh).
+- Live screen-reader pass (NVDA/Orca) still not honestly claimable here.
+- LLM decision stage in computer-use stays `unverified-fallback` until a
+  vision-capable model exists. Voice physical round trip: environment-blocked.
 
 ---
 
