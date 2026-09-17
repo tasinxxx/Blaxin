@@ -1,16 +1,105 @@
 # BLAXIN Engineering Mission — Continuation State
 
-MISSION PHASE: A — LOCKED COMPLETE · PHASE B — IN PROGRESS (parity floor established → 10×)
-CURRENT OBJECTIVE: PHASE B — 10× BLAXIN (see docs/capability-matrix.md; §4 gaps updated after Part B6) · then the PRODUCTION COMPLETION chain (audit → debug → harden → polish → verify → package → release)
-CURRENT SUBTASK: B7 CLOSED (process-control verbs: verified list/inspect/kill on the real machine); next: PRODUCTION COMPLETION chain (audit → debug → harden → polish → verify → package → release)
-CURRENT STATUS: Part B7 COMPLETE — `process-control` tool (candidate #1 from B6's NEXT EXACT ACTION): `list` (bounded ≤50-row structured table from REAL `ps` data: pid/cpu%/mem%/stat/uptime/command, sorted by cpu or mem; unparseable ps output = honest FAILURE, never an empty success), `inspect` (real details for one pid; unknown pid = honest FAILURE), `kill` (explicit pid ONLY — SIGTERM with a bounded 4s exit-poll, optional `force` SIGKILL escalation, SUCCESS only when a fresh read-back shows the pid REALLY gone; protected pids 1/2/self REFUSED before any signal; a SIG_IGN process is honestly reported still-running, never a fake kill). Deterministic router: list phrases ("what is running"), pid-specific kill ("kill 1234", "kill pid 7", "force kill 12", "kill -9 9"), pid inspect; kill-by-NAME ("kill the browser") stays with the LLM loop, which the PROCESSES doctrine paragraph instructs to list first. Risk: list/inspect LOW, kill HIGH (argument-level escalation, gate always asks). REAL lesson captured: SIG_IGN ("trap "" TERM") SURVIVES exec — the first probe draft's victim ignored SIGTERM and the TOOL correctly refused the kill; probe fixed, implementation semantics proven right. FULL suite 921 passed / 16 skipped / 0 failed. Client build clean, E2E 9/9, probe 7/7.
+MISSION PHASE: A — LOCKED COMPLETE · PHASE B — 10× CANDIDATES CLOSED (parity floor established + exceeded) · PRODUCTION COMPLETION CHAIN — IN PROGRESS
+CURRENT OBJECTIVE: PRODUCTION COMPLETION chain (audit → debug → harden → polish → verify → package → release) — see docs/capability-matrix.md (all §4 parity rows CLOSED)
+CURRENT SUBTASK: PRODUCTION-PASS 1 DONE (state recovery → docs commit → full-suite baseline → all runtime probes → dependency/security hardening → packaging verification); next: continuation of the chain (UX/a11y + performance polish, Tauri release-build packaging, final regression matrix)
+CURRENT STATUS: Production pass 1 complete at 19d815d. State recovered (clean tree at da1a688 = B7), the previous session's uncommitted doc+probe work verified and committed (c88f5cf), B6+B7 backlog pushed to origin. FRESH BASELINE: server tsc clean · FULL suite 921/16/0 · client tsc -b + vite build clean · E2E 9/9 · ALL probes re-run green this session on the real machine: process-control 7/7 (real ps + verified kill), bulk-dedupe 14/14 (real SHA-256), browser-forms 10/10 (real Chrome: navigation, per-field read-backs, honest validation-block, disk-verified download), browser-specialist 14/14 (COMPLETED_VERIFIED, real title read), computer-use 9/9 (real Xvfb, OCR grounding, verified teardown), model-routing 16/16 (real Ollama inference: 473s + 520s per call on this CPU-only box — worst-case box reality, honestly recorded; vision honestly BLOCKED with 0 model calls). SECURITY PASS: server npm audit --omit=dev 5→0 (qs DoS fixed via audit fix; uuid 9→14 — advisory affects v3/v5/v6, BLAXIN uses v4, bumped anyway); client audit 5→0 — react-router-dom + react-syntax-highlighter + @types removed as DEAD declared-but-unimported deps (dist hashes byte-identical after removal = they never shipped), clearing the react-router open-redirect (CVE-2025-68470 bypass) + prismjs DOM-clobbering chains; updater validate-latest-json.sh fixed CWD-independent (was hardcoded to a blaxin/ prefix — silently failed from the repo root). PACKAGING: cargo check clean (Tauri 2 + shell/dialog/updater plugins), webkit2gtk-4.1 present, bundle-sync-guard synced + idempotent, bundled dist carries process-control/bulk-files/system-audio, version 1.4.0 consistent across VERSION/tauri.conf/client/server/APP_VERSION, canonical repo tasinxxx/Blaxin in version.ts + manifests. Load-flake note: one suite run under concurrent probe inference showed 1 failure that passed on immediate rerun — the documented reconnect-timing load signature, again not reproducible under normal load.
 COMPLETED: Parts 15–19 (specialist ownership, recovery/re-plan, mission journal, live desktop + real-Chrome verification, tool verification-in-depth, JARVIS state reflection, mission coordination, budget config surface, branding, documentation) · B2 (computer-use loop, system audio, bulk verbs) · B3 (adaptive routing, system telemetry) · B4 (dedupe, MissionPanel bulk surfacing, computer-control polish) · B5 (browser forms + downloads with verification)
 VERIFIED (fresh this session): server tsc clean · FULL suite **921 passed / 16 skipped / 0 failed** (904 → 921; FOUR consecutive green full runs) · process-control **15/15** (bounded honest list, mem/cpu sort, unparseable-ps FAILURE, cap-50, inspect honesty, verified kill, SIGTERM-ignorer honesty + force escalation, ghost-pid FAILURE, protected-pid refusal with ZERO signals, self-kill refusal, invalid pids, gate pinning, parser contract incl. zombie stat) · process-control-LIVE **1/1** (BLAXIN_LIVE_PROCESSES: real spawn → real ps listing → inspect → verified kill → INDEPENDENT system-ps witness) · direct-router 19/19 + risk-permission (process rows) · probe-process-control **7/7 on the real compiled dist + real OS** (real ps table, real kill verified by tool read-back AND independent ps, SIGTERM-ignorer honest FAILURE then SIGKILL verified, ghost honest, guards with zero signals) · client tsc -b + vite build clean · E2E 9/9 (22.1s) · bundle-sync guard synced + idempotent; BUNDLED dist carries process-control (kill gate true, live import probe) · docs updated (capability-matrix §1/§4)
 BLOCKED (environment, not code): live-LLM round trips (no provider key; no local vision-capable model — deterministic coverage + probes prove the paths); voice PHYSICAL audio output; live keystroke-receiver verification
 KNOWN FAILURES: none open
 KNOWN LIMITATIONS: download verification polls the REAL filesystem (bounded 30s; a genuinely silent filesystem is an honest FAILURE); form_submit's same-document confirmation reads the page's own text (a page that confirms NOTHING and does not navigate is an honest FAILURE — never "we clicked"); select read-back accepts the option's REAL label OR value (both are DOM identity — case never normalized away); fill_form cap is 20 fields (bounded scans only)
-NEXT EXACT ACTION: begin the PRODUCTION COMPLETION chain (Phases 2–17 of the master directive: deep debugging, hardening, UX polish, security, performance, crash/recovery, test matrix, packaging, docs, release audit, GitHub release). All three Phase B 10× candidates from B5's list are now CLOSED (procedure learning B6, process control B7; the telemetry-only world-monitor remains an optional 10× candidate but the honest system panel already covers its real-data core). KNOWN LOAD FLAKE (recorded honestly, not reproducible in 4 detail-captured reruns): one anomalous run at 2.4× wall time (84.7s vs ~36s) saw 5 failures under machine load — same signature as the previously documented brain-integration reconnect-timing load flake; all four normal-timing runs 921/16/0. If it reproduces: capture the failing set, serialize, root-cause. When a vision-capable local model OR a provider key becomes available: re-run probe-computer-use.mjs AND probe-model-routing.mjs — the LLM decision stage lights up and the router selects the vision model automatically (both paths are proven and env-adaptive).
+NEXT EXACT ACTION: continue the PRODUCTION COMPLETION chain. Pass 1 (this session) covered: state recovery + backlog push, fresh full-suite baseline, ALL runtime probes re-proven green, dependency/security hardening (both packages at 0 audit), updater script fix, packaging verification (cargo check, bundle sync, version consistency). Remaining chain work: (1) deeper UX/a11y + performance polish sweeps on the HUD panels; (2) real Tauri release-build packaging (`tauri build` for .deb/AppImage artifacts) — build toolchain verified present; (3) final regression matrix (full server suite ×2 consecutive clean, client build, E2E, all probes) immediately before the release gate; (4) release audit per the master directive, then ONLY the release gate decision (v1.4.0 tag still deferred — release is the LAST milestone). KNOWN LOAD FLAKE: one suite run under concurrent probe inference showed 1 failure that passed on immediate rerun (documented reconnect-timing signature; never reproducible at normal load — 5 clean full runs total now). probe-model-routing on this box takes ~18 min wall (real CPU inference 473s+520s/call); run it detached and never concurrently with the test suite.
 RELEASE BLOCKERS: v1.4.0 tag remains deferred — it follows the Phase B scope decision (parity-complete release)
+
+---
+
+## SESSION — PRODUCTION COMPLETION PASS 1: STATE RECOVERY + SECURITY HARDENING + ALL PROBES RE-PROVEN (2026-09-17)
+
+New session started per the continuation rule. NO trust in prior claims — everything
+below is fresh evidence from this session's own runs.
+
+### 1. State recovery (exact, no assumptions)
+- Found: clean tree at da1a688 (B7) with 3 coherent uncommitted files (README tool
+  table, capability-matrix rows, probe scratch-dir sweep) + B6/B7 commits not yet
+  pushed (2 ahead of origin). Previous session had NOT finished its documentation
+  commit — verified content coherence, then committed as c88f5cf and pushed the
+  backlog (d065dff..c88f5cf).
+- B6 confirmed COMPLETE in the committed tree (memory-procedure-learning.test.ts
+  present, 8/8 inside the full suite) — NOT redone, per the no-redo rule.
+
+### 2. Fresh baseline (all green, this session)
+- server tsc --noEmit clean · FULL suite **921 passed / 16 skipped / 0 failed**.
+- client `tsc -b` + `vite build` clean · E2E **9/9 PASS** (24.6s).
+- bundle-sync-guard: synced (server dist was newer) then idempotent; bundled
+  `resources/blaxin-server/dist/tools/` carries process-control (symbols probed),
+  bulk-files, system-audio. (resources/ is gitignored — guard-refreshed artifact.)
+
+### 3. Runtime probes RE-RUN on the real machine (evidence, no claims)
+- probe-process-control **7/7** (real ps table 289 processes, real kill verified
+  by tool read-back AND independent ps, SIGTERM-ignorer honest, guards zero-signal).
+- probe-bulk-dedupe **14/14** (real SHA-256 groups, deterministic keeper,
+  verified delete, post-delete honest-empty).
+- probe-browser-forms **10/10** (BLAXIN_REAL_CHROME, real headless Chrome:
+  4/4 field read-backs, submit navigated to /thank-you VERIFIED, empty-required
+  honestly FAILED by Chrome validation, disk-verified 1344-byte download,
+  404 download honest FAILURE, ghost grounding refused).
+- probe-browser-specialist **14/14** (COMPLETED_VERIFIED from the REAL page title;
+  journal trail persisted; DETERMINISTIC route, 0 model calls).
+- probe-computer-use **9/9** (BLAXIN_COMPUTER_USE + xvfb-run: real xmessage,
+  OCR grounding 6 elements, smooth travel, dialog really exited, window really
+  gone; decision stage honest `unverified-fallback` — no vision model, unchanged).
+- probe-model-routing **16/16** (real local Ollama; qwen3:4b selected by real
+  /api/tags capability data; vision honestly BLOCKED with 0 model calls;
+  journal evidence persisted). REALITY MEASURED: each real inference call took
+  **473s and 520s wall** on this 8GB CPU-only box — the probe takes ~18 min
+  end-to-end. Operational rules captured: run it DETACHED (setsid — a plain
+  nohup background job does not survive the launching shell) and NEVER
+  concurrently with the test suite (see load-flake note below).
+- Env-gated LIVE tests re-run on the real machine: process-control-LIVE 1/1
+  (BLAXIN_LIVE_PROCESSES), system-audio-LIVE 1/1 (real PipeWire sink),
+  vision-LIVE 1/1 + desktop-LIVE 5/5 (BLAXIN_LIVE_DESKTOP, real X display).
+
+### 4. Security / dependency hardening (both packages → 0 audit)
+- server: `npm audit --omit=dev` 5 moderate → **0**. qs DoS chain (array-limit
+  bypass + isBuffer) reachable through express/body-parser fixed by `npm audit
+  fix`; uuid 9.0.1 → 14 (advisory affects v3/v5/v6 with caller-provided buffers
+  — BLAXIN only uses v4 — bumped anyway for a clean audit). tsc clean, full
+  suite green after the bump.
+- client: audit 5 moderate → **0** by REMOVING dead dependencies —
+  react-router-dom, react-syntax-highlighter (+@types) are declared in
+  package.json but imported NOWHERE in client/src (the HUD uses state-based
+  panel switching, no router). Proof they never shipped: dist asset hashes
+  BYTE-IDENTICAL before/after removal. vite.config.ts manualChunks updated
+  (react-markdown stays — it is really used by ChatPanel). Cleared advisories:
+  react-router open redirect (CVE-2025-68470 bypass + constructor injection),
+  prismjs DOM clobbering chain. tsc -b + vite build clean, E2E 9/9 after.
+- updater: `update/validate-latest-json.sh` default path was hardcoded to
+  `blaxin/update/latest.json` — the script silently failed unless run from the
+  repo PARENT. Now CWD-independent (resolves latest.json next to the script);
+  explicit paths still win. Verified PASSED from repo root AND home dir.
+
+### 5. Packaging / production verification (read-only checks)
+- `cargo check --manifest-path src-tauri/Cargo.toml` clean (Tauri 2 +
+  shell/dialog/updater plugins compile; webkit2gtk-4.1 present) — the release
+  build toolchain is REAL on this machine for the next pass.
+- Version 1.4.0 consistent across VERSION, tauri.conf.json, client, server,
+  APP_VERSION. Canonical repo tasinxxx/Blaxin in version.ts + updater manifests.
+- Crash/recovery coverage audited (no gaps fixed — none found): SIGINT/SIGTERM
+  shutdown handlers, OCI deployment resume-after-crash, mid-flight mission
+  pause-on-restart, task-queue requeue honesty, journal/telemetry corrupt-file
+  recovery, distributed restart/reconnect suites.
+- JarvisPanel/HUD audited for the zero-fake-state doctrine: all values from the
+  real jarvis-state snapshot, honest empty states, UNVERIFIED as a first-class
+  color — nothing to fix.
+
+### Honest remaining gaps (unchanged classifications)
+- LLM decision stage in computer-use stays `unverified-fallback` until a
+  vision-capable model exists (routing selects one automatically when it does).
+- Voice physical round trip: environment-blocked.
+- `.deb`/AppImage release artifacts not yet built this chain (toolchain verified;
+  `tauri build` is the next pass's packaging step — gated with the release rule,
+  artifacts do NOT create a release).
 
 ---
 
