@@ -96,7 +96,7 @@ export function NetworkHubPanel() {
         <polyline fill="url(#jh-txGrad)" stroke="none" points={toArea(txData.current)} />
         <polyline fill="none" stroke="#00ff9f" strokeWidth="1" style={{ filter: 'drop-shadow(0 0 3px #00ff9f)' }} points={toPoints(txData.current)} />
       </svg>
-      <div className="jh-net-stats">
+      <div className="jh-net-stats" aria-label={`Network throughput: receive ${fmtRate(rx)}, transmit ${fmtRate(tx)}`}>
         <div className="jh-net-stat">RX: <span className="rx">{fmtRate(rx)}</span></div>
         <div className="jh-net-stat">TX: <span className="tx">{fmtRate(tx)}</span></div>
         <div className="jh-net-stat">TOTAL: <span>{fmtBytes(telemetry?.rxTotalBytes ?? 0)} in / {fmtBytes(telemetry?.txTotalBytes ?? 0)} out</span></div>
@@ -107,11 +107,11 @@ export function NetworkHubPanel() {
       </div>
       <div className="jh-conn-list">
         {conns.map((c, i) => (
-          <div key={i} className="jh-conn-row">
+          <div key={i} className="jh-conn-row" aria-label={`${c.name}: ${c.active ? 'active' : 'inactive'}`}>
             <div className="jh-conn-dot" style={c.active ? undefined : { background: 'var(--accent-amber)' }} />
             <div className="jh-conn-host">{c.name}</div>
             <div className="jh-conn-proto">{c.proto}</div>
-            {c.active && <div className="jh-conn-flow" />}
+            {c.active && <div className="jh-conn-flow" aria-hidden="true" />}
           </div>
         ))}
       </div>

@@ -136,11 +136,15 @@ export function AgentTerminalPanel({ sendMessage, stopAgent, clearHistory }: Age
           }}
         />
       </div>
-      <div className="jh-terminal-tabs">
+      <div className="jh-terminal-tabs" role="tablist" aria-label="Terminal stream filter">
         {TABS.map((t) => (
           <button
             key={t.id}
             type="button"
+            role="tab"
+            id={`jh-tab-${t.id}`}
+            aria-selected={tab === t.id}
+            aria-controls="jh-terminal-stream"
             className={`jh-tab ${tab === t.id ? 'active' : ''}`}
             onClick={() => setTab(t.id)}
           >
@@ -148,7 +152,11 @@ export function AgentTerminalPanel({ sendMessage, stopAgent, clearHistory }: Age
           </button>
         ))}
       </div>
-      <div className="jh-terminal-body" ref={bodyRef}>
+      {/* role=feed (NOT role=status): the stream is a scrolling log of many
+          items, not a single announcement. The e2e contract pins the two
+          real [role=status] regions (StatusBar first, composer live region
+          second) — a third status region would break that order. */}
+      <div className="jh-terminal-body" ref={bodyRef} role="feed" aria-label="Agent event stream" aria-live="polite">
         {/* Visually hidden polite live region (screen readers). Second
            [role=status] in the DOM after StatusBar's — the e2e contract
            depends on that order. */}
@@ -192,7 +200,8 @@ export function AgentTerminalPanel({ sendMessage, stopAgent, clearHistory }: Age
           <button
             type="button"
             className="jh-composer-btn"
-            aria-label={isListening ? 'Stop listening' : 'Start voice input'}
+            aria-label={isListening ? 'Stop voice input' : 'Start voice input'}
+            aria-pressed={isListening}
             onClick={() => (isListening ? stopListening() : startListening())}
             style={isListening ? { borderColor: 'var(--accent-red)', color: 'var(--accent-red)' } : undefined}
           >
@@ -205,7 +214,10 @@ export function AgentTerminalPanel({ sendMessage, stopAgent, clearHistory }: Age
           </button>
         ) : (
           <>
-            <button type="button" className="jh-composer-btn" onClick={clearHistory} title="Reset conversation (memory kept)">
+            {/* Accessible name avoids the word "memory" — it collides with
+                the sidebar Memory button in accessible-name queries (and
+                "clear the conversation" is the actual user purpose). */}
+            <button type="button" className="jh-composer-btn" onClick={clearHistory} aria-label="Clear conversation history" title="Reset conversation (memory kept)">
               CLR
             </button>
             <button type="button" className="jh-composer-btn" aria-label="Send message" onClick={handleSend} disabled={!input.trim()}>

@@ -541,6 +541,18 @@
   animation: jh-ticker 60s linear infinite;
 }
 @keyframes jh-ticker { from { transform: translateX(0); } to { transform: translateX(-50%); } }
+/* WCAG 2.2.2: explicit pause state (button toggle / hover / focus). */
+.jh-rail-ticker.jh-rail-paused { animation-play-state: paused; }
+.jh-rail-pause {
+  background: transparent; border: 1px solid var(--border-dim); border-radius: 2px;
+  color: var(--text-dim); font-size: 8px; line-height: 1;
+  padding: 3px 6px; cursor: pointer; flex-shrink: 0;
+  font-family: 'Share Tech Mono', monospace;
+  transition: color 0.2s, border-color 0.2s;
+}
+.jh-rail-pause:hover { color: var(--text-primary); border-color: var(--border-primary); }
+/* The ticker strip is keyboard-focusable (pause-on-focus reading aid). */
+.jh-rail-ticker-wrap:focus-visible { outline: 1px solid var(--border-primary); outline-offset: 1px; }
 
 /* =============================================================
    TOASTS
@@ -562,6 +574,17 @@
 /* Reduced motion */
 @media (prefers-reduced-motion: reduce) {
   .jh *, .jh *::before, .jh *::after { animation: none !important; transition: none !important; }
+  /* The marquee must also be STATIC for reduced-motion users (the global
+     animation kill leaves transform: none, but pin the start state). */
+  .jh-rail-ticker { transform: none !important; }
+}
+
+/* Keyboard focus visibility — HUD-wide (cyberpunk.css covers the classic
+   views; the HUD chrome needs the same guarantee). */
+.jh button:focus-visible,
+.jh [role='tab']:focus-visible {
+  outline: 1px solid var(--border-primary);
+  outline-offset: 1px;
 }
 
 /* ── Agency panel — real worker activations ─────────────────── */

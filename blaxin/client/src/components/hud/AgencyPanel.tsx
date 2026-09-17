@@ -44,7 +44,14 @@ function WorkerRow({ w }: { w: WorkerRecord }) {
   const scopeTag =
     w.state === 'skipped' || w.permissionScope === 'DENY' ? 'DENIED' : null;
   return (
-    <div className="jh-agency-worker" data-testid="agency-worker" title={w.error || w.result || w.description}>
+    // The real state is part of the accessible name so a screen reader
+    // hears "role — description — RUNNING", not just the visible text.
+    <div
+      className="jh-agency-worker"
+      data-testid="agency-worker"
+      title={w.error || w.result || w.description}
+      aria-label={`${w.role}: ${w.description || w.tool} — ${STATE_LABEL[state] ?? String(state).toUpperCase()}`}
+    >
       <span className="jh-agency-role">{w.role}</span>
       <span className="jh-agency-desc">
         {w.description || w.tool}
@@ -79,7 +86,9 @@ export function AgencyPanel() {
 
   return (
     <Panel name="AGENCY" icon="◇">
-      <div className="jh-agency-head" data-testid="agency-head">
+      {/* aria-label (NOT role=status): the two e2e-pinned [role=status]
+          regions must stay first/second in the DOM. */}
+      <div className="jh-agency-head" data-testid="agency-head" aria-label={`Agent state: ${String(agency.agentState).toUpperCase()}`}>
         <span>AGENT {String(agency.agentState).toUpperCase()}</span>
         {agency.queueWaiting > 0 && <span> · {agency.queueWaiting} QUEUED</span>}
         {agency.taskWaiting && <span style={{ color: 'var(--jh-warn, #ffc857)' }}> · AWAITING APPROVAL</span>}

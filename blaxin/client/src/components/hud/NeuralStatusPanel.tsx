@@ -46,7 +46,14 @@ export function NeuralStatusPanel() {
           <div className="jh-bar-fill" style={{ width: connected ? (running ? '96%' : '62%') : '4%' }} />
         </div>
       </div>
-      <div className="jh-bar-row">
+      <div
+        className="jh-bar-row"
+        role="progressbar"
+        aria-label="Task progress"
+        aria-valuenow={steps.length > 0 ? taskPercent : undefined}
+        aria-valuemin={0}
+        aria-valuemax={100}
+      >
         <div className="jh-bar-label">
           TASK PROGRESS <span>{steps.length > 0 ? `${taskPercent}%` : '—'}</span>
         </div>

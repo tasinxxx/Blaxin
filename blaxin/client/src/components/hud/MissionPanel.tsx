@@ -90,10 +90,13 @@ export function MissionPanel() {
               </span>
               {v ? <span className={`jh-mission-v ${v.cls}`}>{v.label}</span> : null}
             </div>
-            <div className="jh-mission-meta">
+            <div className="jh-mission-meta" aria-label={`Mission ${m.objective}: ${m.status.toUpperCase()} at ${Math.round(m.progress * 100)} percent`}>
+              {/* aria-label carries the full honest status for assistive
+                  tech; no role=status here — the two e2e-pinned
+                  [role=status] regions must keep their DOM order. */}
               <span>{m.status.toUpperCase()}</span>
-              <span> · {Math.round(m.progress * 100)}%</span>
-              {active && <span> · ACTIVE</span>}
+              <span aria-hidden="true"> · {Math.round(m.progress * 100)}%</span>
+              <span aria-hidden="true"> · ACTIVE</span>
             </div>
             {m.steps.slice(0, 4).map((s, i) => (
               <StepRow key={s.id} step={s} index={i} />

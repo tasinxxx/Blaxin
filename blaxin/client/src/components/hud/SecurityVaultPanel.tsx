@@ -29,9 +29,9 @@ export function SecurityVaultPanel() {
 
   return (
     <Panel name="SECURITY_VAULT" className="jh-security" dot={blocked > 0 ? 'amber' : 'green'}>
-      <div className="jh-sec-row">
+      <div className="jh-sec-row" aria-label={`Authentication status: ${connected ? 'verified' : 'offline'}`}>
         <div className="jh-sec-label">AUTH STATUS</div>
-        <div className="jh-sec-bar-track">
+        <div className="jh-sec-bar-track" aria-hidden="true">
           <div className="jh-sec-bar-fill" style={{ width: connected ? '100%' : '20%' }} />
         </div>
         <div className="jh-sec-val">{connected ? 'VERIFIED' : 'OFFLINE'}</div>

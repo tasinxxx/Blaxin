@@ -80,6 +80,7 @@ export function HudHeader() {
       <div className={`jh-brand ${glitch ? 'glitch' : ''}`}>BLAXIN</div>
       <div className="jh-header-divider">//</div>
       <div className="jh-header-sub">AI_AGENT_OS</div>
+      {/* Decorative wave: hidden from AT; the bars are pure animation. */}
       <div className="jh-wave" aria-hidden="true">
         {waveBars.map((b, i) => (
           <div
@@ -100,16 +101,16 @@ export function HudHeader() {
           <div className="jh-status-dot" />
           {connected ? 'ONLINE' : 'OFFLINE'}
         </div>
-        <div className="jh-header-stat">
+        <div className="jh-header-stat" aria-label={`Neural state: ${STATE_LABELS[agentState] || String(agentState).toUpperCase()}`}>
           NEURAL: <span>{STATE_LABELS[agentState] || String(agentState).toUpperCase()}</span>
         </div>
-        <div className="jh-header-stat">
+        <div className="jh-header-stat" aria-label={`Session duration ${formatHMS(sessionSeconds)}`}>
           SESSION: <span className="jh-session-timer">{formatHMS(sessionSeconds)}</span>
         </div>
-        <div className="jh-header-stat">
+        <div className="jh-header-stat" aria-label={`Device id ${deviceId || 'pending'}`}>
           ID: <span>{deviceId || '—'}</span>
         </div>
-        <div className="jh-header-stat">
+        <div className="jh-header-stat" aria-label={`Queue: ${queued} waiting${running ? ', one running' : ''}`}>
           QUEUE: <span>{queued}{running ? ' · RUN' : ''}</span>
         </div>
         {activeModel && (

@@ -33,9 +33,9 @@ export function TaskQueuePanel({ onQueueAction }: { onQueueAction: (id: string, 
       <table className="jh-task-table">
         <thead>
           <tr>
-            <th style={{ textAlign: 'left' }}>TASK</th>
-            <th style={{ textAlign: 'left' }}>STATUS</th>
-            <th style={{ textAlign: 'right' }}>T</th>
+            <th scope="col" style={{ textAlign: 'left' }}>TASK</th>
+            <th scope="col" style={{ textAlign: 'left' }}>STATUS</th>
+            <th scope="col" style={{ textAlign: 'right' }}>T</th>
           </tr>
         </thead>
         <tbody>
@@ -58,17 +58,17 @@ export function TaskQueuePanel({ onQueueAction }: { onQueueAction: (id: string, 
                   <span className={cell.cls}>{cell.label}</span>
                   {t.status === 'queued' && (
                     <div className="jh-task-actions">
-                      <button type="button" className="jh-task-act" title="Cancel this queued task" onClick={() => onQueueAction(t.id, 'cancel')}>× CANC</button>
+                      <button type="button" className="jh-task-act" title={`Cancel queued task ${idShort}`} aria-label={`Cancel queued task: ${t.objective}`} onClick={() => onQueueAction(t.id, 'cancel')}>× CANC</button>
                     </div>
                   )}
                   {t.status === 'paused' && (
                     <div className="jh-task-actions">
-                      <button type="button" className="jh-task-act" title="Resume this paused task" onClick={() => onQueueAction(t.id, 'resume')}>▶ RES</button>
+                      <button type="button" className="jh-task-act" title={`Resume paused task ${idShort}`} aria-label={`Resume paused task: ${t.objective}`} onClick={() => onQueueAction(t.id, 'resume')}>▶ RES</button>
                     </div>
                   )}
                   {t.status === 'running' && (
                     <div className="jh-task-actions">
-                      <button type="button" className="jh-task-act" title="Pause this running task" onClick={() => onQueueAction(t.id, 'pause')}>⏸ HOLD</button>
+                      <button type="button" className="jh-task-act" title={`Pause running task ${idShort}`} aria-label={`Pause running task: ${t.objective}`} onClick={() => onQueueAction(t.id, 'pause')}>⏸ HOLD</button>
                     </div>
                   )}
                 </td>

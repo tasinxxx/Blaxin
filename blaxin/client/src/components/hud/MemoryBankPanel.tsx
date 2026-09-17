@@ -44,16 +44,16 @@ export function MemoryBankPanel() {
 
   return (
     <Panel name="MEMORY_BANK" className="jh-memory" dot="green">
-      <div className="jh-mem-row">
+      <div className="jh-mem-row" aria-label={`Context: ${messageCount} messages`}>
         <div className="jh-mem-label">CONTEXT</div>
-        <div className="jh-mem-track">
+        <div className="jh-mem-track" aria-hidden="true">
           <div className="jh-mem-fill" style={{ width: `${contextPercent}%` }} />
         </div>
         <div className="jh-mem-val">{messageCount} msg</div>
       </div>
-      <div className="jh-mem-row">
+      <div className="jh-mem-row" aria-label={`Long-term memory: ${entries.length} entries`}>
         <div className="jh-mem-label">LONG TERM</div>
-        <div className="jh-mem-track">
+        <div className="jh-mem-track" aria-hidden="true">
           <div className="jh-mem-fill purple" style={{ width: `${ltmPercent}%` }} />
         </div>
         <div className="jh-mem-val">{entries.length}</div>

@@ -58,8 +58,16 @@ export function BootOverlay() {
   if (phase === 'gone') return null;
 
   return (
-    <div className={`jh-boot ${phase === 'leaving' ? 'leaving' : 'sweeping'}`} data-testid="boot-overlay">
-      <div className="jh-boot-scanline" />
+    // role=progressbar (NOT role=status/alert): the boot overlay is
+    // transient chrome — it must never enter the two e2e-pinned
+    // [role=status] regions or steal screen-reader focus from the app.
+    <div
+      className={`jh-boot ${phase === 'leaving' ? 'leaving' : 'sweeping'}`}
+      data-testid="boot-overlay"
+      role="progressbar"
+      aria-label="BLAXIN boot sequence"
+    >
+      <div className="jh-boot-scanline" aria-hidden="true" />
       <div className="jh-boot-title">INITIALIZING BLAXIN CORE...</div>
       <div className="jh-boot-lines">
         {BOOT_LINES.slice(0, visibleLines).map((line, i) => (

@@ -15,16 +15,18 @@ interface PanelProps {
 
 export function Panel({ name, icon = '◈', dot = 'green', className, children, bodyStyle, bodyClassName }: PanelProps) {
   return (
-    <div className={`jh-panel ${className || ''}`}>
+    // Named region: every HUD panel is a screen-reader landmark carrying
+    // its real title (aria-label matches the visible panel name).
+    <section className={`jh-panel ${className || ''}`} aria-label={name}>
       <div className="jh-panel-title">
-        <span className="jh-panel-icon">{icon}</span>
+        <span className="jh-panel-icon" aria-hidden="true">{icon}</span>
         <span className="jh-panel-name">{name}</span>
-        {dot !== 'none' && <div className={`jh-panel-dot ${dot === 'amber' ? 'amber' : ''}`} />}
+        {dot !== 'none' && <div className={`jh-panel-dot ${dot === 'amber' ? 'amber' : ''}`} aria-hidden="true" />}
       </div>
       <div className={`jh-panel-body ${bodyClassName || ''}`} style={bodyStyle}>
         {children}
       </div>
-      <div className="jh-corner-br" />
-    </div>
+      <div className="jh-corner-br" aria-hidden="true" />
+    </section>
   );
 }
