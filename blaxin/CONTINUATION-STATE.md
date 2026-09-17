@@ -2,7 +2,7 @@
 
 MISSION PHASE: A — LOCKED COMPLETE · PHASE B — 10× CANDIDATES CLOSED (parity floor established + exceeded) · PRODUCTION COMPLETION CHAIN — IN PROGRESS
 CURRENT OBJECTIVE: PRODUCTION COMPLETION chain (audit → debug → harden → polish → verify → package → release) — see docs/capability-matrix.md (all §4 parity rows CLOSED)
-CURRENT SUBTASK: PRODUCTION-PASS 1 DONE (state recovery → docs commit → full-suite baseline → all runtime probes → dependency/security hardening → packaging verification); next: continuation of the chain (UX/a11y + performance polish, Tauri release-build packaging, final regression matrix)
+CURRENT SUBTASK: UX/A11Y POLISH PASS DONE (commit 9a96200 — named landmarks, tablist, ticker pause, progressbar, focus visibility, aria-labels, NEW a11y.spec.ts E2E); next: performance polish (8GB-budget check) → real tauri build artifacts → final regression matrix → release audit
 CURRENT STATUS: Production pass 1 complete at 19d815d. State recovered (clean tree at da1a688 = B7), the previous session's uncommitted doc+probe work verified and committed (c88f5cf), B6+B7 backlog pushed to origin. FRESH BASELINE: server tsc clean · FULL suite 921/16/0 · client tsc -b + vite build clean · E2E 9/9 · ALL probes re-run green this session on the real machine: process-control 7/7 (real ps + verified kill), bulk-dedupe 14/14 (real SHA-256), browser-forms 10/10 (real Chrome: navigation, per-field read-backs, honest validation-block, disk-verified download), browser-specialist 14/14 (COMPLETED_VERIFIED, real title read), computer-use 9/9 (real Xvfb, OCR grounding, verified teardown), model-routing 16/16 (real Ollama inference: 473s + 520s per call on this CPU-only box — worst-case box reality, honestly recorded; vision honestly BLOCKED with 0 model calls). SECURITY PASS: server npm audit --omit=dev 5→0 (qs DoS fixed via audit fix; uuid 9→14 — advisory affects v3/v5/v6, BLAXIN uses v4, bumped anyway); client audit 5→0 — react-router-dom + react-syntax-highlighter + @types removed as DEAD declared-but-unimported deps (dist hashes byte-identical after removal = they never shipped), clearing the react-router open-redirect (CVE-2025-68470 bypass) + prismjs DOM-clobbering chains; updater validate-latest-json.sh fixed CWD-independent (was hardcoded to a blaxin/ prefix — silently failed from the repo root). PACKAGING: cargo check clean (Tauri 2 + shell/dialog/updater plugins), webkit2gtk-4.1 present, bundle-sync-guard synced + idempotent, bundled dist carries process-control/bulk-files/system-audio, version 1.4.0 consistent across VERSION/tauri.conf/client/server/APP_VERSION, canonical repo tasinxxx/Blaxin in version.ts + manifests. Load-flake note: one suite run under concurrent probe inference showed 1 failure that passed on immediate rerun — the documented reconnect-timing load signature, again not reproducible under normal load.
 COMPLETED: Parts 15–19 (specialist ownership, recovery/re-plan, mission journal, live desktop + real-Chrome verification, tool verification-in-depth, JARVIS state reflection, mission coordination, budget config surface, branding, documentation) · B2 (computer-use loop, system audio, bulk verbs) · B3 (adaptive routing, system telemetry) · B4 (dedupe, MissionPanel bulk surfacing, computer-control polish) · B5 (browser forms + downloads with verification)
 VERIFIED (fresh this session): server tsc clean · FULL suite **921 passed / 16 skipped / 0 failed** (904 → 921; FOUR consecutive green full runs) · process-control **15/15** (bounded honest list, mem/cpu sort, unparseable-ps FAILURE, cap-50, inspect honesty, verified kill, SIGTERM-ignorer honesty + force escalation, ghost-pid FAILURE, protected-pid refusal with ZERO signals, self-kill refusal, invalid pids, gate pinning, parser contract incl. zombie stat) · process-control-LIVE **1/1** (BLAXIN_LIVE_PROCESSES: real spawn → real ps listing → inspect → verified kill → INDEPENDENT system-ps witness) · direct-router 19/19 + risk-permission (process rows) · probe-process-control **7/7 on the real compiled dist + real OS** (real ps table, real kill verified by tool read-back AND independent ps, SIGTERM-ignorer honest FAILURE then SIGKILL verified, ghost honest, guards with zero signals) · client tsc -b + vite build clean · E2E 9/9 (22.1s) · bundle-sync guard synced + idempotent; BUNDLED dist carries process-control (kill gate true, live import probe) · docs updated (capability-matrix §1/§4)
@@ -11,6 +11,72 @@ KNOWN FAILURES: none open
 KNOWN LIMITATIONS: download verification polls the REAL filesystem (bounded 30s; a genuinely silent filesystem is an honest FAILURE); form_submit's same-document confirmation reads the page's own text (a page that confirms NOTHING and does not navigate is an honest FAILURE — never "we clicked"); select read-back accepts the option's REAL label OR value (both are DOM identity — case never normalized away); fill_form cap is 20 fields (bounded scans only)
 NEXT EXACT ACTION: continue the PRODUCTION COMPLETION chain. Pass 1 (this session) covered: state recovery + backlog push, fresh full-suite baseline, ALL runtime probes re-proven green, dependency/security hardening (both packages at 0 audit), updater script fix, packaging verification (cargo check, bundle sync, version consistency). Remaining chain work: (1) deeper UX/a11y + performance polish sweeps on the HUD panels; (2) real Tauri release-build packaging (`tauri build` for .deb/AppImage artifacts) — build toolchain verified present; (3) final regression matrix (full server suite ×2 consecutive clean, client build, E2E, all probes) immediately before the release gate; (4) release audit per the master directive, then ONLY the release gate decision (v1.4.0 tag still deferred — release is the LAST milestone). KNOWN LOAD FLAKE: one suite run under concurrent probe inference showed 1 failure that passed on immediate rerun (documented reconnect-timing signature; never reproducible at normal load — 5 clean full runs total now). probe-model-routing on this box takes ~18 min wall (real CPU inference 473s+520s/call); run it detached and never concurrently with the test suite.
 RELEASE BLOCKERS: v1.4.0 tag remains deferred — it follows the Phase B scope decision (parity-complete release)
+
+---
+
+## SESSION — UX/ACCESSIBILITY POLISH PASS ACROSS THE HUD (2026-09-17)
+
+Production-chain continuation (pass 2). Full inventory audit of all 15 HUD
+components + shared hooks first; only real gaps fixed, all additive, no
+architecture change. Every fix verified in the SERVED DOM, not just source.
+
+### What changed (all in client/src/components/hud/ + jarvis.css)
+- Panel.tsx: every HUD panel is now a named landmark — <section aria-label>
+  (aria-label = the visible panel name; never diverges from what is shown).
+- AgentTerminalPanel: terminal tabs are a REAL tablist (role=tab,
+  aria-selected, aria-controls); the event stream is exposed as role=feed —
+  deliberately NOT a third role=status, because the e2e contract pins the
+  two [role=status] regions (StatusBar first, composer live region second)
+  and a third would silently break app.spec's .nth(1) announcement check.
+  MIC button got aria-pressed; CLR got an accessible name that avoids the
+  word "memory" — REAL collision found by app.spec's strict-mode query for
+  the sidebar Memory button (caught by the suite, fixed properly).
+- ActivityTicker: WCAG 2.2.2 pause/stop for moving content — explicit
+  pause/resume toggle button + pause-while-focused on the keyboard-focusable
+  strip. HOVER-PAUSE was implemented first and then REJECTED on real
+  evidence: after any click the pointer rests over the rail (and headless
+  Chrome never delivers mouseleave), so hover kept the ticker pinned paused
+  and defeated the explicit toggle. Final semantics: toggle + focus only.
+- TaskQueuePanel: column headers scope=col; queue action buttons carry
+  aria-labels naming the CONCRETE task ("Cancel queued task: <objective>")
+  instead of icon-only meaning.
+- AgencyPanel: worker rows carry an aria-label joining role, description and
+  the REAL state ("specialist: open the report — RUNNING"); agent-state head
+  labelled via aria-label (never role=status, per the pinned order).
+- MissionPanel: mission meta row aria-label carries the honest status +
+  percent; decorative separators aria-hidden.
+- NeuralStatusPanel: TASK PROGRESS is a real role=progressbar with
+  aria-valuenow/min/max (undefined — honest — when no task is running).
+- HudHeader: decorative wave aria-hidden; NEURAL/SESSION/ID/QUEUE stats
+  carry aria-labels with the real values.
+- NetworkHubPanel: throughput stats labelled with real RX/TX; connection
+  rows labelled name + active/inactive; flow animation aria-hidden.
+- MemoryBankPanel + SecurityVaultPanel: bar tracks aria-hidden (decorative
+  fill), rows labelled with the real counts/status.
+- BootOverlay: role=progressbar with an aria-label — NEVER status/alert
+  (transient chrome must not enter the announcement regions or steal focus).
+- jarvis.css: HUD-wide .jh button:focus-visible outline (cyberpunk.css had
+  the classic views covered; the HUD chrome did not); ticker pause state +
+  pause button styling; reduced-motion block now also pins the marquee
+  STATIC (transform none), not just animation-off.
+
+### Verification (real served DOM — new pinned test)
+- NEW e2e/tests/a11y.spec.ts (E2E 9 → 10): asserts named landmarks, the
+  tablist with one selected tab, EXACTLY two [role=status] regions (order
+  preservation), feed semantics, computed animation-play-state toggling
+  running→paused→running via the button, pause-on-focus, ZERO unnamed
+  buttons in the HUD, the focus-visible rule installed, and the progressbar
+  exposure — all against the REAL backend + vite + Chrome stack.
+- E2E **10/10 PASS** (28.3s). Client tsc -b + vite build clean. Server
+  suite re-run untouched-but-verified: **921 passed / 16 skipped / 0 failed**.
+- One test bug fixed in authoring: Playwright's toHaveCSS needs the CSS
+  property name ('animation-play-state'), not the camelCase JS name.
+
+### Honest remaining gaps
+- Live screen-reader pass (NVDA/Orca round trip) still not honestly
+  claimable in this environment; all assertions are DOM/computed-style
+  level. Documented, not hidden.
+- Voice physical round trip: environment-blocked (unchanged).
 
 ---
 
