@@ -424,7 +424,11 @@ export const useAppStore = create<AppState>((set) => ({
   agentDescription: null,
   setAgentDescription: (desc) => set({ agentDescription: desc }),
   messages: [],
-  addMessage: (msg) => set((s) => ({ messages: [...s.messages, msg] })),
+  // Bounded like every other feed on this store (toolExecutions ≤20,
+  // activityFeed ≤200, journal ≤400): chat was the ONE unbounded buffer —
+  // every addMessage copied the whole array, growing forever in a long
+  // session. 200 messages is the activity feed's proven bound.
+  addMessage: (msg) => set((s) => ({ messages: [...s.messages.slice(-199), msg] })),
   clearMessages: () => set({ messages: [] }),
 
   pendingConfirmation: null,

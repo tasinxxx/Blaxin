@@ -58,7 +58,9 @@ export function ParticleCanvas() {
 
     const anim = () => {
       ctx.clearRect(0, 0, canvas.width, canvas.height);
-      for (const p of particles) {
+      const n = particles.length;
+      for (let i = 0; i < n; i++) {
+        const p = particles[i];
         const dx = p.x - mouseX;
         const dy = p.y - mouseY;
         const dist = Math.sqrt(dx * dx + dy * dy);
@@ -74,7 +76,11 @@ export function ParticleCanvas() {
         if (p.x > canvas.width) p.x = 0;
         if (p.y < 0) p.y = canvas.height;
         if (p.y > canvas.height) p.y = 0;
-        for (const q of particles) {
+        // Each pair once (j starts at i+1): the old all-pairs scan drew
+        // every connecting line TWICE (A→B and B→A) and walked n² pairs
+        // per frame; this is the same picture at ~half the work.
+        for (let j = i + 1; j < n; j++) {
+          const q = particles[j];
           const d = Math.sqrt((p.x - q.x) ** 2 + (p.y - q.y) ** 2);
           if (d < 120 && d > 0) {
             ctx.beginPath();
