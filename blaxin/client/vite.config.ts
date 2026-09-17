@@ -19,9 +19,9 @@ export default defineConfig({
         // Sensible code splitting: heavy feature libraries get their own
         // cached chunks instead of one ~790 kB monolithic bundle.
         manualChunks: {
-          react: ['react', 'react-dom', 'react-router-dom'],
+          react: ['react', 'react-dom'],
           motion: ['framer-motion'],
-          markdown: ['react-markdown', 'react-syntax-highlighter'],
+          markdown: ['react-markdown'],
           xterm: ['@xterm/xterm', '@xterm/addon-fit', '@xterm/addon-web-links'],
           icons: ['react-icons'],
         },
