@@ -204,10 +204,14 @@ The provisioning state machine is resumable and cancellable; READY only appears 
 | Tool | Description |
 |------|-------------|
 | `terminal` | Execute shell commands |
-| `filesystem` | Read/write/manage files |
-| `computer-control` | Mouse, keyboard, window management |
+| `filesystem` | Read/write/manage files (writes verified by read-back) |
+| `bulk-files` | Organize by type, batch move/copy/delete, bulk rename, content-hash dedupe (real SHA-256) — always confirmation-gated |
+| `computer-control` | Mouse, keyboard, window management (screen-bounds grounding, focus awareness) |
+| `process-control` | List/inspect real processes; kill by explicit pid — SUCCESS only when verified gone by fresh read-back |
 | `screenshot` | Capture screen state |
-| `browser` | Open URLs, search web |
+| `browser` | Real Chrome via CDP: open URLs, verified session navigation, tabs |
+| `blaxin_web` | Grounded in-page actions: click/type/snapshot, multi-field form fill with per-field read-back, verified form submission, disk-verified downloads |
+| `system-audio` | Volume get/set/mute with read-back verification (PipeWire) |
 | `clipboard` | System clipboard access |
 | `search` | Web search |
 | `system-info` | System information |

@@ -23,7 +23,7 @@
 // ===================================================================
 
 import { spawn } from 'node:child_process';
-import { mkdtempSync, readFileSync, existsSync } from 'node:fs';
+import { mkdtempSync, readFileSync, existsSync, rmSync, readdirSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import net from 'node:net';
@@ -33,6 +33,16 @@ const events = [];
 let ws;
 let server;
 let serverPort = 0;
+// Hygiene: a previous run that was OOM-killed mid-inference leaves its
+// scratch dir behind (the process never reaches its own cleanup). Sweep
+// those stale dirs at startup — they carry nothing of value.
+try {
+  for (const entry of readdirSync(tmpdir())) {
+    if (entry.startsWith('blaxin-routing-proof-')) {
+      rmSync(join(tmpdir(), entry), { recursive: true, force: true });
+    }
+  }
+} catch { /* best effort */ }
 const dataDir = mkdtempSync(join(tmpdir(), 'blaxin-routing-proof-'));
 const steps = [];
 const failures = [];
