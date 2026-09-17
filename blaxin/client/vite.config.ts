@@ -20,7 +20,6 @@ export default defineConfig({
         // cached chunks instead of one ~790 kB monolithic bundle.
         manualChunks: {
           react: ['react', 'react-dom'],
-          motion: ['framer-motion'],
           markdown: ['react-markdown'],
           xterm: ['@xterm/xterm', '@xterm/addon-fit', '@xterm/addon-web-links'],
           icons: ['react-icons'],
