@@ -59,12 +59,13 @@ Continued the chain exactly in order. State recovered first (a11y session commit
   real-machine-detection tests timed out, passed 20/20 in isolation minutes
   later; zero code changes); runs 2+3 back-to-back **921 passed / 16 skipped /
   0 failed** — the required two consecutive green runs.
-- client `tsc -b` + `vite build` clean · E2E **10/10** (25.5s).
+- client `tsc -b` + `vite build` clean · E2E **10/10** (25.5s). Full probe
+  ladder green — every runtime behavior the chain claims is re-proven.
 - Probes on the real compiled dist: process-control **7/7**, bulk-dedupe
   **14/14**, browser-forms **10/10** (real Chrome), browser-specialist **14/14**
-  (COMPLETED_VERIFIED), computer-use **9/9** (real Xvfb). probe-model-routing
-  launched detached per the operational rule (result recorded when complete;
-  its last full run this week was 16/16).
+  (COMPLETED_VERIFIED), computer-use **9/9** (real Xvfb), model-routing
+  **16/16** (real Ollama inference: 534s + 372s per call this run; vision
+  honestly BLOCKED with 0 model calls; secret-redaction proven again).
 
 ### 4. Release audit (all read-only checks)
 - Version 1.4.0 consistent: VERSION, tauri.conf.json, Cargo.toml (consumed by
