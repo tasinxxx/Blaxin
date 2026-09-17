@@ -21,7 +21,10 @@ GREEN='\033[0;32m'
 YELLOW='\033[1;33m'
 NC='\033[0m'
 
-JSON_FILE="${1:-blaxin/update/latest.json}"
+# Default: latest.json next to this script — CWD-independent (running from
+# the repo root, the repo parent, or anywhere else all resolve correctly).
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+JSON_FILE="${1:-${SCRIPT_DIR}/latest.json}"
 EXPECTED_VERSION="${2:-}"
 ERRORS=0
 
