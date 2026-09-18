@@ -1,17 +1,17 @@
 {
-  "version": "1.3.0",
-  "notes": "BLAXIN v1.3.0 — See https://github.com/tasinxxx/Blaxin/releases/tag/v1.3.0 for details.",
-  "pub_date": "2026-09-09T05:03:18Z",
+  "version": "1.4.0",
+  "notes": "BLAXIN v1.4.0 \u2014 See https://github.com/tasinxxx/Blaxin/releases/tag/v1.4.0 for details.",
+  "pub_date": "2026-09-17T17:31:31Z",
   "platforms": {
     "linux-x86_64": {
-      "signature": "dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZSBmcm9tIHRhdXJpIHNlY3JldCBrZXkKUlVTcTRPa3l4NjJhTzE5bmVlbWhhK2p2ZlBsRUhqUjY1VDRnNVRlZ1hvZDdJTHFORDJLQ2YzL0Jtc3YvL3QrZEpKUlJkS2huRmp6RkhCUzFRYWlVSlFTVGNhTEEzOXlSc2c0PQp0cnVzdGVkIGNvbW1lbnQ6IHRpbWVzdGFtcDoxNzg4OTMwMTk3CWZpbGU6QkxBWElOXzEuMy4wX2FtZDY0LkFwcEltYWdlClY3bzc1QW85WndSSHJtZjJKcW00elZqTFkwT2VmWkZCM2E1MmV4UCtzRDkyKzhBejdDOHU1VzZTTTVra1E3NXJ2QWU1eXNZNHpKRm54OFh0Ui9vNUNnPT0K",
-      "url": "https://github.com/tasinxxx/Blaxin/releases/download/v1.3.0/BLAXIN_1.3.0_amd64.AppImage",
-      "sha256": "2380ffa4e60957b2bcea41b4ed69f0de1dcbb07aa5dd79dd011acec76d6af641"
+      "signature": "dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZSBmcm9tIHRhdXJpIHNlY3JldCBrZXkKUlVTcTRPa3l4NjJhTzQrb0FaaDBaRmNmWDNqSS91dUlRN2FIaEFvS3lzSEpkV1NqUkZNbzRRZWM2WUtjSlVnRW9taWpCcE1FKzRTNndwME96MkV1ckhpYk10TEFGNEZ2a3dZPQp0cnVzdGVkIGNvbW1lbnQ6IHRpbWVzdGFtcDoxNzg5NjY2MjkwCWZpbGU6QkxBWElOXzEuNC4wX2FtZDY0LkFwcEltYWdlClJIVW5WVlE4cGhuNHVSaUREQkl3aGI3QmxXaUVDYWppT0xrVEpnbjk4TU5HTTd6ckJqTVZWOVVaZjQvR3BLQUNmVjFhVlRBbU9tWjROYXN3MU1mYURBPT0K",
+      "url": "https://github.com/tasinxxx/Blaxin/releases/download/v1.4.0/BLAXIN_1.4.0_amd64.AppImage",
+      "sha256": "a644d5cc6d550cdf008f0a80ba637d024e68bc792ab5ebd55d069a5ec72336fe"
     }
   },
   "deb": {
-    "url": "https://github.com/tasinxxx/Blaxin/releases/download/v1.3.0/blaxin_1.3.0_amd64.deb",
-    "signature": "dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZSBmcm9tIHRhdXJpIHNlY3JldCBrZXkKUlVTcTRPa3l4NjJhTzdFWFc5My84MjRHQjRnOVFCTlVzaDUvWlIrSXlEZENPaTVpQk83b25kSzdGT3cxalNDUlhxOVBiSi9wNUNOYUJmdGswUzA2cTQ4UmFwT25DdnJBa2dVPQp0cnVzdGVkIGNvbW1lbnQ6IHRpbWVzdGFtcDoxNzg4OTMwMTk4CWZpbGU6YmxheGluXzEuMy4wX2FtZDY0LmRlYgowTHpuQ1N4dittTnNjSGVPMVl4R2gxRDBFd3JzVlkvdDk3ZjJqckdIdnB6d2dhWi9mTFYwbXpyVVhZTExwR3djeXpkZzF0a3UyMkNXd0ZZaE8vcjBEZz09Cg==",
-    "sha256": "0b5f6f637bb672d65dc9a8d830a4ead47155e730bd91946b127007863d2c7a79"
+    "url": "https://github.com/tasinxxx/Blaxin/releases/download/v1.4.0/blaxin_1.4.0_amd64.deb",
+    "signature": "dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZSBmcm9tIHRhdXJpIHNlY3JldCBrZXkKUlVTcTRPa3l4NjJhTzc5clhCcUtuQWJhTHA5VG1UM3VWVkNvU0lna3YxcDMvZ2tBclo5NkRHTlQwRnVoY3k0Wmk1VnMvVG4yTG83RDYyMU5kc09mQzBHVGhZVzFJdTdFcGdnPQp0cnVzdGVkIGNvbW1lbnQ6IHRpbWVzdGFtcDoxNzg5NjY2MjkxCWZpbGU6YmxheGluXzEuNC4wX2FtZDY0LmRlYgp5c3JyaTRPeEd1bVIwbG9LTW51ODQwL01iQVQ3SFZkbkZ0bXA3eHdLb3hlS3lVaGhtUnQyYTBzbzVXUmpPVENCMGE0dzNpU1psYkh0NTZrUXd1RGVDZz09Cg==",
+    "sha256": "76a49d64ac535bf2c23ddd6199371b4e79cca6ca03f98ed9adc032cab5b8486f"
   }
 }
