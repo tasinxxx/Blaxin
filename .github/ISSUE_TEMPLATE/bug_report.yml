@@ -1,5 +1,5 @@
 name: Bug report
-description: Report a problem with BLAXIN v1.4.0
+description: Report a problem with BLAXIN v1.4.0 (the final public release)
 labels: ["bug"]
 body:
   - type: markdown

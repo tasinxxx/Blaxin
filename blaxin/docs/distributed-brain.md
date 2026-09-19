@@ -481,15 +481,18 @@ recovery re-drives them through the normal driver path. Task ids are
 replay-protected by the existing replay guard, so a reconnected Body
 cannot re-deliver an already-completed task outcome.
 
-## Roadmap (not yet implemented)
+## Design space (not implemented in v1.4.0)
 
 Model router, Brain-owned memory store, LAN discovery, QR pairing,
 relay transport, coordinated signed releases and update compatibility
-are future phases — the backend architecture (one Brain → many Bodies,
-persistent device registry, protocol negotiation, revocation) already
-supports them. Local models + Oracle Cloud inference (implemented in
-v1.2.0 — see `docs/models.md` and `docs/oci.md`) now supply the Brain's
-model from the local machine or a cloud shape.
+are documented design space, not implemented features. v1.4.0 is the
+final public release of BLAXIN, so these are recorded here as design
+notes rather than planned work; the backend architecture (one Brain →
+many Bodies, persistent device registry, protocol negotiation,
+revocation) already supports them. Local models + Oracle Cloud
+inference (implemented in v1.2.0 — see `docs/models.md` and
+`docs/oci.md`) supply the Brain's model from the local machine or a
+cloud shape.
 
 ### Multi-body test files
 

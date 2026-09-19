@@ -2,7 +2,7 @@
 
 Thanks for your interest in improving BLAXIN. This document covers what to know before opening issues or pull requests.
 
-**Note**: v1.4.0 is the current stable release. Bug fixes and documentation improvements are welcome; please avoid proposing sweeping architecture rewrites without discussing them in an issue first.
+**Note**: v1.4.0 is the final public release. The repository remains open for bug fixes, documentation, maintenance, and non-release improvements — but no subsequent public version is planned, and contributors should not prepare or propose new numbered releases. Releases are maintainer-owned.
 
 ## Reporting bugs
 

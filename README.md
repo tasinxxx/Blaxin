@@ -9,6 +9,10 @@
 </p>
 
 <p align="center">
+  <em><strong>v1.4.0 is the final public release.</strong> The repository may receive documentation, maintenance, and non-release improvements, but no subsequent public version is planned.</em>
+</p>
+
+<p align="center">
   <a href="https://github.com/tasinxxx/Blaxin/releases"><img src="https://img.shields.io/github/v/release/tasinxxx/Blaxin?label=release&display_name=tag&sort=semver" alt="Release" /></a>
   <a href="https://github.com/tasinxxx/Blaxin/actions/workflows/e2e.yml"><img src="https://github.com/tasinxxx/Blaxin/actions/workflows/e2e.yml/badge.svg" alt="E2E" /></a>
   <a href="https://github.com/tasinxxx/Blaxin/pkgs/container/blaxin%2Fserver"><img src="https://github.com/tasinxxx/Blaxin/actions/workflows/docker-build.yml/badge.svg" alt="Docker" /></a>
@@ -66,7 +70,7 @@ Every capability claim is grounded in the code and test suite — see **[docs/CA
 
 ## Installation (Linux x86_64)
 
-The one-command installer downloads the latest stable release from GitHub, verifies its SHA-256 checksum, and installs it with desktop integration:
+The one-command installer downloads the latest stable release from GitHub — currently **v1.4.0, the final public release** — verifies its SHA-256 checksum, and installs it with desktop integration:
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/tasinxxx/Blaxin/main/blaxin/install.sh | bash
@@ -211,11 +215,13 @@ Full detail: **[SECURITY.md](SECURITY.md)**. To report a security vulnerability,
 
 ## Project status
 
-**Stable.** BLAXIN **v1.4.0** is the current release and the recommended version for all users. It ships the Jarvis HUD, mission coordination, verified browser/computer/file/process control, and the layered memory system — all backed by a 900+ test suite and real-machine runtime probes recorded in the [release notes](blaxin/update/RELEASE-NOTES-v1.4.0.md).
+**v1.4.0 is the final public release of BLAXIN.** The repository may still receive documentation, maintenance, and non-release improvements, but no subsequent public version is planned.
 
-- **Download**: [v1.4.0 release](https://github.com/tasinxxx/Blaxin/releases/tag/v1.4.0)
+BLAXIN **v1.4.0** is complete and remains the recommended version for all users. It ships the Jarvis HUD, mission coordination, verified browser/computer/file/process control, and the layered memory system — all backed by a 900+ test suite and real-machine runtime probes recorded in the [release notes](blaxin/update/RELEASE-NOTES-v1.4.0.md).
+
+- **Download**: [v1.4.0 release](https://github.com/tasinxxx/Blaxin/releases/tag/v1.4.0) — the final public release
 - **Updater manifest**: `blaxin/update/latest.json` (signed artifacts)
-- **Roadmap**: the project is maintained; bug reports and security reports are welcome via the issue tracker
+- **Maintenance**: bug reports and security reports are welcome via the issue tracker; documentation and non-release maintenance may continue, but no further numbered release is planned
 
 ## Screenshots
 

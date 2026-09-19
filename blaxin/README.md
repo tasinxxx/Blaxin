@@ -266,7 +266,7 @@ BLAXIN keeps a persistent memory store (`.blaxin-state/memory.json` under the da
 
 ## Installer
 
-One-command installation for Linux x86_64 downloads the latest stable release, verifies its checksum and installs it with desktop integration:
+One-command installation for Linux x86_64 downloads the latest stable release — currently **v1.4.0, the final public release** — verifies its checksum and installs it with desktop integration:
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/tasinxxx/Blaxin/main/blaxin/install.sh | bash

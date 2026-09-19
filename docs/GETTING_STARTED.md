@@ -8,7 +8,7 @@ A walkthrough from install to your first verified task. For the one-command inst
 curl -fsSL https://raw.githubusercontent.com/tasinxxx/Blaxin/main/blaxin/install.sh | bash
 ```
 
-The installer resolves the latest stable release (v1.4.0), verifies the SHA-256 checksum, and installs the right package for your distro:
+The installer resolves the latest stable release (v1.4.0 — the final public release), verifies the SHA-256 checksum, and installs the right package for your distro:
 
 - **Debian / Ubuntu / Kali / Mint / Pop!_OS** → the `.deb` package (runs against your system WebKitGTK — the most reliable configuration)
 - **Other distros** → the portable AppImage in `/opt/blaxin` plus a desktop entry

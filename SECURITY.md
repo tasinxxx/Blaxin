@@ -4,7 +4,7 @@
 
 | Version | Supported |
 |---|---|
-| 1.4.0 | ✅ Current release |
+| 1.4.0 | ✅ Current and final public release |
 | < 1.4.0 | ❌ Please update via the in-app updater or the [release page](https://github.com/tasinxxx/Blaxin/releases) |
 
 ## Reporting a vulnerability
