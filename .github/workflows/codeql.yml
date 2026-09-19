@@ -1,0 +1,45 @@
+# CodeQL static analysis ("Advanced" code-scanning setup).
+#
+# The repository's JS/TS server + client code is analyzed on every push to
+# main and every PR, plus a weekly scan. Results appear in the Security tab
+# ("Code scanning alerts"). This is repository CI only — it does not affect
+# the application, the release process, or v1.4.0.
+
+name: CodeQL
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  schedule:
+    - cron: '23 4 * * 1'
+
+permissions:
+  contents: read
+  security-events: write
+
+jobs:
+  analyze:
+    name: Analyze (javascript-typescript)
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Initialize CodeQL
+        uses: github/codeql-action/init@v3
+        with:
+          languages: javascript-typescript
+          # Analyze application sources, not generated/Vendored trees.
+          queries: security-extended
+
+      - name: Autobuild
+        uses: github/codeql-action/autobuild@v3
+
+      - name: Perform CodeQL Analysis
+        uses: github/codeql-action/analyze@v3
+        with:
+          category: "/language:javascript-typescript"
