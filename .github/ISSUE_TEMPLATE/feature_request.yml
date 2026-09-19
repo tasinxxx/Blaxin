@@ -1,0 +1,36 @@
+name: Feature request
+description: Suggest an idea for BLAXIN
+labels: ["enhancement"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Feature ideas are welcome. Please ground them in a real use case — BLAXIN's scope is a local-first Linux desktop agent with verified actions, and proposals that conflict with that doctrine (e.g. fabricated or unverifiable success states) will not be accepted.
+
+        Note: v1.4.0 is the current stable release. Check [existing issues](https://github.com/tasinxxx/Blaxin/issues) and [docs/CAPABILITIES.md](https://github.com/tasinxxx/Blaxin/blob/main/docs/CAPABILITIES.md) first — the capability may already exist.
+  - type: textarea
+    id: problem
+    attributes:
+      label: Problem / use case
+      description: What are you trying to accomplish, and what stands in the way today?
+    validations:
+      required: true
+  - type: textarea
+    id: proposal
+    attributes:
+      label: Proposed solution
+      description: What you'd like to happen. Be concrete about what BLAXIN should do and how a result would be *verified*.
+    validations:
+      required: true
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: Alternatives considered
+      description: Workarounds, other tools, or existing BLAXIN features that get close.
+  - type: checkboxes
+    id: alignment
+    attributes:
+      label: Scope check
+      options:
+        - label: This fits BLAXIN's scope (local-first Linux desktop agent with verified actions)
+          required: true

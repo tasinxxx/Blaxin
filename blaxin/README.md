@@ -1,8 +1,10 @@
 # BLAXIN — AI Desktop Agent
 
-A futuristic, production-quality AI desktop agent capable of understanding user instructions, planning tasks, interacting with the computer's GUI/desktop, using applications, working with files, using the browser, and completing multi-step tasks.
+BLAXIN is a local-first AI desktop agent for Linux: it understands plain-language instructions, plans multi-step tasks, and then executes them — driving the terminal, the file system, the GUI, and the browser, with verification of every action and an explicit approval gate before anything high-impact.
 
-## Architecture```
+## Architecture
+
+```
 BLAXIN UI (React + Vite)
     ↓
 Jarvis Command Layer (v1.4.0): deterministic fast-path router →
@@ -293,7 +295,7 @@ launcher and desktop entry, as before.
   against the distro's own WebKitGTK, which is the most reliable configuration.
 
   ```bash
-  sudo apt install ./blaxin_1.2.0_amd64.deb   # or: sudo dpkg -i … && sudo apt-get install -f
+  sudo apt install ./blaxin_1.4.0_amd64.deb   # or: sudo dpkg -i … && sudo apt-get install -f
   blaxin
   ```
 

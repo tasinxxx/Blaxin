@@ -1,0 +1,82 @@
+name: Bug report
+description: Report a problem with BLAXIN v1.4.0
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for taking the time to report a bug. The more context you give, the faster it can be diagnosed.
+
+        Tip: if a task misbehaved, the **Mission Journal** (Journal page in the HUD) records exactly what happened — paste the relevant excerpt below.
+  - type: textarea
+    id: description
+    attributes:
+      label: What happened?
+      description: A clear description of the bug — what you expected vs. what actually happened.
+      placeholder: BLAXIN did X instead of Y...
+    validations:
+      required: true
+  - type: textarea
+    id: reproduce
+    attributes:
+      label: Steps to reproduce
+      description: The exact instruction/command and the steps that trigger the problem.
+      placeholder: |
+        1. Type "organize ~/Downloads by type"
+        2. Approve the confirmation dialog
+        3. ...
+    validations:
+      required: true
+  - type: dropdown
+    id: install-method
+    attributes:
+      label: How did you install BLAXIN?
+      options:
+        - One-command installer (install.sh)
+        - .deb package
+        - AppImage
+        - From source (start.sh / npm)
+        - Docker
+        - Other / not sure
+    validations:
+      required: true
+  - type: dropdown
+    id: display-server
+    attributes:
+      label: Display server
+      description: Affects desktop-control verification (X11 is fully supported; some Wayland read-backs are unavailable by design).
+      options:
+        - X11
+        - Wayland
+        - Headless / no display
+        - Not sure
+    validations:
+      required: true
+  - type: textarea
+    id: environment
+    attributes:
+      label: Environment
+      description: Distro and version, desktop environment, BLAXIN version (Settings or `/version`), AI provider/model in use.
+      placeholder: "Kali Linux 2026.2, GNOME, BLAXIN v1.4.0, OpenRouter / anthropic/claude-... "
+    validations:
+      required: true
+  - type: textarea
+    id: journal
+    attributes:
+      label: Mission Journal excerpt (if applicable)
+      description: From the Journal page in the HUD or `GET /api/journal` — this records what really happened and usually pinpoints the failure.
+      render: text
+  - type: textarea
+    id: logs
+    attributes:
+      label: Logs / screenshots
+      description: Console output from `blaxin`, screenshots, or anything else relevant. Do NOT paste API keys.
+  - type: checkboxes
+    id: checks
+    attributes:
+      label: Checks
+      options:
+        - label: I redacted any API keys / secrets from logs and journal excerpts
+          required: true
+        - label: I checked existing issues for duplicates
+          required: true

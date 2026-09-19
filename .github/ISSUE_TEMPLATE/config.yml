@@ -1,0 +1,8 @@
+blank_issues_enabled: false
+contact_links:
+  - name: Security vulnerability
+    url: https://github.com/tasinxxx/Blaxin/security/advisories/new
+    about: Please report security issues privately — do not open a public issue (see SECURITY.md)
+  - name: Documentation problem
+    url: https://github.com/tasinxxx/Blaxin/issues/new?template=bug_report.yml
+    about: Found something wrong or unclear in the docs? Open a bug report and label it as documentation
