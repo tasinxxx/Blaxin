@@ -1,4 +1,7 @@
 {
+  "build": {
+    "beforeBuildCommand": "bash ../scripts/bundle-sync-guard.sh"
+  },
   "bundle": {
     "targets": ["nsis"],
     "createUpdaterArtifacts": false,
