@@ -243,6 +243,24 @@ jobs:
           [ "${{ github.event.inputs.confirm_tag }}" = "v1.4.0" ] || {
             echo "FATAL: confirm_tag must be exactly v1.4.0 (got '${{ github.event.inputs.confirm_tag }}')"; exit 1; }
 
+      # Tauri runs beforeBuildCommand from a platform-dependent cwd; the
+      # relative path in the overlay config is fine on macOS (verified) but
+      # misses the guard on Windows. Pin an ABSOLUTE path (forward slashes —
+      # Git Bash) so the guard runs no matter what cwd Tauri picks.
+      - name: Pin the Windows beforeBuildCommand to an absolute guard path
+        shell: pwsh
+        run: |
+          $guard = (Join-Path $PWD "blaxin/scripts/bundle-sync-guard.sh") -replace '\\','/'
+          if (-not (Test-Path $guard)) {
+            Write-Host "blaxin/scripts contents:"; Get-ChildItem blaxin/scripts -ErrorAction SilentlyContinue
+            throw "bundle-sync-guard.sh missing from the v1.4.0 checkout"
+          }
+          $path = "$env:OVERLAY_DIR/tauri.windows.conf.json"
+          $conf = Get-Content $path -Raw | ConvertFrom-Json
+          $conf.build.beforeBuildCommand = "bash `"$guard`""
+          ($conf | ConvertTo-Json -Depth 10) | Set-Content $path -Encoding utf8
+          Write-Host "beforeBuildCommand pinned to: $($conf.build.beforeBuildCommand)"
+
       - name: Verify we are on the v1.4.0 tag commit
         shell: bash
         run: |
