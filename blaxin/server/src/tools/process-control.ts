@@ -1,6 +1,7 @@
 import { Tool, ToolResult } from '../types.js';
 import { execFile } from 'child_process';
 import { promisify } from 'util';
+import { currentPlatform } from '../utils/platform.js';
 
 const execFileAsync = promisify(execFile);
 
@@ -310,6 +311,17 @@ export class ProcessControlTool implements Tool {
 
   async execute(args: Record<string, unknown>): Promise<ToolResult> {
     const action = args.action as string;
+    // Phase 6 honesty: ps/kill semantics are POSIX. On Windows this tool is
+    // an explicit unavailability (never a fake result). macOS keeps the
+    // full implementation — its ps supports every field the parser reads.
+    if (currentPlatform() === 'windows') {
+      return {
+        success: false,
+        output: '',
+        error: `process-control (${action}) is not available on Windows in BLAXIN v1.4.0 — it uses POSIX ps/kill. Filesystem, terminal, browser, clipboard and AI features remain available.`,
+        data: { action, platform: 'windows', available: false },
+      };
+    }
     try {
       switch (action) {
         case 'list':

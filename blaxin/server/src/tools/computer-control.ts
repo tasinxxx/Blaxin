@@ -1,6 +1,7 @@
 import { Tool, ToolResult } from '../types.js';
 import { exec, execFile, spawn } from 'child_process';
 import { promisify } from 'util';
+import { currentPlatform, openHandler, computerUseUnsupportedReason } from '../utils/platform.js';
 
 const execAsync = promisify(exec);
 const execFileAsync = promisify(execFile);
@@ -336,6 +337,20 @@ export class ComputerControlTool implements Tool {
   async execute(args: Record<string, unknown>): Promise<ToolResult> {
     const action = args.action as string;
 
+    // Platform honesty (Phase 6 rule): desktop input/window automation is
+    // X11/Wayland-only in v1.4.0. On other platforms every action is an
+    // honest unavailability — never a fake success, never a crash. The
+    // exception is launch_app, which has a real Windows implementation.
+    const unsupported = computerUseUnsupportedReason();
+    if (unsupported && action !== 'launch_app') {
+      return {
+        success: false,
+        output: '',
+        error: `${action} is unavailable on this platform: ${unsupported}`,
+        data: { action, platform: currentPlatform(), available: false },
+      };
+    }
+
     try {
       switch (action) {
         case 'mouse_click': {
@@ -577,6 +592,45 @@ export class ComputerControlTool implements Tool {
         case 'launch_app': {
           const app = String(args.app ?? '').trim();
           if (!app) return { success: false, output: '', error: 'App name is required' };
+          const openWith = openHandler();
+          if (currentPlatform() === 'windows') {
+            // Windows path: spawn the app directly, fall back to the OS
+            // shell handler. Same verification read-back discipline as Linux.
+            try {
+              await new Promise<void>((resolve, reject) => {
+                const child = spawn(app, [], { detached: true, stdio: 'ignore', shell: false });
+                child.once('spawn', () => { child.unref(); resolve(); });
+                child.once('error', (err) => reject(err));
+              });
+            } catch {
+              try {
+                if (openWith) await this.runner(openWith.cmd, [...openWith.prefix, app], 10000);
+              } catch (startError: any) {
+                return {
+                  success: false,
+                  output: '',
+                  error: `Failed to launch ${app}: not found and the shell handler failed (${startError.message})`,
+                };
+              }
+            }
+            const wbase = app.split(/[\\/]/).pop() || app;
+            let walive = false;
+            try {
+              await new Promise((r) => setTimeout(r, 700));
+              const { stdout } = await this.runner('tasklist.exe', ['/FI', `IMAGENAME eq ${wbase}`], 3000);
+              walive = new RegExp(`^${wbase.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\b`, 'im').test(stdout);
+            } catch { walive = false; }
+            if (!walive) {
+              return {
+                success: false,
+                output: '',
+                error: `Launch NOT verified: no running process named "${wbase}" after startup window`,
+                data: { app, verified: false },
+              };
+            }
+            return { success: true, output: `Launched: ${app} — verified running process "${wbase}"`, data: { app, process: wbase, verified: true } };
+          }
+          // macOS shares the Linux path below with open(1) as the OS handler.
           // Never pass the app string through a shell; resolve it like a PATH
           // executable. Launch DETACHED so the app outlives this tool call —
           // the old execFileAsync('nohup', [app], { timeout: 5000 }) version
@@ -593,10 +647,11 @@ export class ComputerControlTool implements Tool {
               child.once('error', (err) => reject(err));
             });
           } catch {
-            // ENOENT etc.: not launchable directly — try xdg-open (handlers,
-            // .desktop entries, URLs) through the runner seam before giving up.
+            // ENOENT etc.: not launchable directly — try the OS open handler
+            // (xdg-open on Linux — the frozen v1.4.0 behavior — / open on
+            // macOS) through the runner seam before giving up.
             try {
-              await this.runner('xdg-open', [app], 10000);
+              await this.runner(openWith ? openWith.cmd : 'xdg-open', [app], 10000);
             } catch (xdgError: any) {
               return {
                 success: false,

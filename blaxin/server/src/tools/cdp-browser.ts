@@ -25,7 +25,10 @@
 
 import WebSocket from 'ws';
 import { execFile } from 'child_process';
+import { tmpdir } from 'os';
+import { join } from 'path';
 import { logger } from '../utils/logger.js';
+import { chromiumCandidates, chromiumAbsolutePaths } from '../utils/platform.js';
 
 const CDP_PORT = Number(process.env.BLAXIN_CDP_PORT || 9222);
 const CDP_HOST = '127.0.0.1';
@@ -556,7 +559,9 @@ export async function launchWithCdp(chromiumPath = 'chromium'): Promise<void> {
   await new Promise<void>((resolve, reject) => {
     const child = execFile(chromiumPath, [
       `--remote-debugging-port=${CDP_PORT}`,
-      '--user-data-dir=/tmp/blaxin-cdp-profile',
+      // Platform temp dir (on Linux this is exactly the historical
+      // /tmp/blaxin-cdp-profile path).
+      `--user-data-dir=${join(tmpdir(), 'blaxin-cdp-profile')}`,
       '--no-first-run', '--no-default-browser-check',
       'about:blank',
     ], { env }, (error) => {
@@ -571,10 +576,15 @@ export async function launchWithCdp(chromiumPath = 'chromium'): Promise<void> {
   });
 }
 
+/** All launchable Chromium candidates: absolute installs probed first, then PATH. */
+function launchCandidates(): string[] {
+  return [...chromiumAbsolutePaths(), ...chromiumCandidates()];
+}
+
 /** Ensure a CDP endpoint exists; returns the page connection. */
 export async function ensureCdpPage(url: string | null): Promise<CdpPage> {
   if (!(await isCdpAlive())) {
-    for (const bin of ['chromium', 'chromium-browser', 'google-chrome', 'google-chrome-stable']) {
+    for (const bin of launchCandidates()) {
       try {
         await launchWithCdp(bin);
         break;

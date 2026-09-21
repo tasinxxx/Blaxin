@@ -38,7 +38,12 @@ INSTALL_DIR="/opt/blaxin"
 BIN_DIR="/usr/local/bin"
 DESKTOP_DIR="/usr/share/applications"
 ICON_DIR="/usr/share/pixmaps"
-GITHUB_API="https://api.github.com/repos/${REPO}/releases/latest"
+# Test hooks (rustup-style, opt-in only): BLAXIN_GITHUB_API points the
+# release lookup at an alternative endpoint (the installer test harness
+# uses a local fake); BLAXIN_DRY_RUN stops right after checksum
+# verification, before anything is installed. Defaults are the official
+# GitHub endpoints — production behavior is unchanged.
+GITHUB_API="${BLAXIN_GITHUB_API:-https://api.github.com/repos/${REPO}/releases/latest}"
 GITHUB_DOWNLOAD="https://github.com/${REPO}/releases/download"
 
 # Timeouts
@@ -189,7 +194,7 @@ echo -e "${NC}"
 header "Step 1/6: Checking system requirements"
 
 # Detect OS
-OS_NAME=$(uname -s)
+OS_NAME="${BLAXIN_OS_NAME:-$(uname -s)}"
 if [[ "${OS_NAME}" != "Linux" ]]; then
     fatal "This installer is for Linux only. Detected: ${OS_NAME}" \
           "Visit https://github.com/${REPO} for other platforms."
@@ -197,7 +202,7 @@ fi
 success "Operating system: Linux"
 
 # Detect architecture
-ARCH=$(uname -m)
+ARCH="${BLAXIN_ARCH_NAME:-$(uname -m)}"
 case "${ARCH}" in
     x86_64|amd64)
         ARCH="x86_64"
@@ -249,14 +254,15 @@ else
 fi
 success "Download tool: ${DOWNLOAD_TOOL} $(command -v ${DOWNLOAD_TOOL})"
 
-# Check for sha256sum
+# Check for sha256sum — mandatory. An unverifiable binary must NEVER be
+# installed (fail closed). sha256sum ships with coreutils on every normal
+# Linux; shasum covers the exotic remainder.
 if ! check_command sha256sum && ! check_command shasum; then
-    warn "sha256sum/shasum not found. Checksum verification will be skipped."
-    HAS_SHA256=false
-else
-    HAS_SHA256=true
-    success "Checksum tool: available"
+    fatal "Neither sha256sum nor shasum is available — refusing to install an unverifiable binary (checksum verification is mandatory)." \
+          "Install coreutils (provides sha256sum) and retry."
 fi
+HAS_SHA256=true
+success "Checksum tool: available"
 
 # Check disk space (need at least 200MB in /opt)
 if check_command df; then
@@ -474,39 +480,52 @@ if [[ "${HAS_SHA256}" == "true" ]]; then
     CHECKSUM_URL="${ASSET_URL}.sha256"
     CHECKSUM_PATH="${TEMP_DIR}/${ASSET_NAME}.sha256"
 
-    # Try to download checksum file
-    CHECKSUM_OK=false
-
-    if download_file "${CHECKSUM_URL}" "${CHECKSUM_PATH}" 2>/dev/null; then
-        # Parse expected hash (format: "hash  filename" or just "hash")
-        EXPECTED_HASH=$(awk '{print $1}' "${CHECKSUM_PATH}")
-
-        if [[ -n "${EXPECTED_HASH}" ]]; then
-            if check_command sha256sum; then
-                ACTUAL_HASH=$(sha256sum "${DOWNLOAD_PATH}" | awk '{print $1}')
-            else
-                ACTUAL_HASH=$(shasum -a 256 "${DOWNLOAD_PATH}" | awk '{print $1}')
-            fi
-
-            if [[ "${EXPECTED_HASH}" == "${ACTUAL_HASH}" ]]; then
-                success "Checksum verified: ${ACTUAL_HASH:0:16}..."
-                CHECKSUM_OK=true
-            else
-                error "Checksum mismatch!"
-                error "Expected: ${EXPECTED_HASH}"
-                error "Actual:   ${ACTUAL_HASH}"
-                error "The downloaded file may be corrupted or tampered with."
-                fatal "Aborting installation for safety."
-            fi
-        fi
+    # Fail closed: no checksum file means NO installation. (Phase 1 rule.)
+    if ! download_file "${CHECKSUM_URL}" "${CHECKSUM_PATH}" 2>/dev/null; then
+        rm -f "${DOWNLOAD_PATH}"
+        error "Checksum file unavailable: ${CHECKSUM_URL}"
+        error "REFUSING to install an unverifiable package."
+        echo ""
+        echo -e "  ${BOLD}What to do:${NC}"
+        echo "  • Retry later — the checksum may still be propagating"
+        echo "  • Verify the SHA-256 yourself and install manually:"
+        echo "      sha256sum ${ASSET_NAME}"
+        echo ""
+        exit "${EXIT_VERIFICATION_ERROR}"
     fi
 
-    if [[ "${CHECKSUM_OK}" == "false" ]]; then
-        warn "Could not verify checksum (checksum file unavailable)."
-        warn "Proceeding — the download came from HTTPS GitHub CDN."
+    EXPECTED_HASH=$(awk '{print $1}' "${CHECKSUM_PATH}")
+
+    if [[ ! "${EXPECTED_HASH}" =~ ^[0-9a-fA-F]{64}$ ]]; then
+        rm -f "${DOWNLOAD_PATH}"
+        error "Checksum file is malformed — refusing to install."
+        exit "${EXIT_VERIFICATION_ERROR}"
     fi
-else
-    warn "Checksum verification skipped (sha256sum not available)."
+
+    if check_command sha256sum; then
+        ACTUAL_HASH=$(sha256sum "${DOWNLOAD_PATH}" | awk '{print $1}')
+    else
+        ACTUAL_HASH=$(shasum -a 256 "${DOWNLOAD_PATH}" | awk '{print $1}')
+    fi
+
+    if [[ "$(printf '%s' "${EXPECTED_HASH}" | tr '[:upper:]' '[:lower:]')" != "$(printf '%s' "${ACTUAL_HASH}" | tr '[:upper:]' '[:lower:]')" ]]; then
+        rm -f "${DOWNLOAD_PATH}"
+        error "Checksum mismatch!"
+        error "Expected: ${EXPECTED_HASH}"
+        error "Actual:   ${ACTUAL_HASH}"
+        error "The downloaded file may be corrupted or tampered with."
+        fatal "Aborting installation for safety."
+    fi
+
+    success "Checksum verified: ${ACTUAL_HASH:0:16}..."
+fi
+
+# Dry-run gate: everything up to here (OS/arch detection, release lookup,
+# download, checksum verification) is side-effect free. The test harness
+# exercises exactly this pipeline; nothing is installed in dry-run mode.
+if [[ -n "${BLAXIN_DRY_RUN:-}" ]]; then
+    success "Dry run (BLAXIN_DRY_RUN): artifact + checksum verified — stopping before install"
+    exit "${EXIT_SUCCESS}"
 fi
 
 # ═══════════════════════════════════════════════════════════════════════

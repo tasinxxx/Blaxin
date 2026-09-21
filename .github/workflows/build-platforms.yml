@@ -1,0 +1,386 @@
+name: Build platform artifacts for the existing v1.4.0 release
+
+# CROSS-PLATFORM RELEASE RULE (do not weaken):
+#   - v1.4.0 stays the final numbered release; this workflow NEVER creates
+#     a release, tag, or version bump.
+#   - Artifacts are built from the EXACT v1.4.0 tag commit (refs/tags/v1.4.0
+#     checkout below — never a branch).
+#   - The only source change is scripts/platform-overlay/v1.4.0/lib.rs.patch
+#     (Windows node.exe probe), applied on top of the tag checkout. The
+#     overlay pack itself lives on main (not in the tag tree) and is
+#     fetched from main and staged into the checkout at run time.
+#   - Upload goes ONLY to the existing v1.4.0 release via the GitHub
+#     Releases upload endpoint. No softprops release creation, no draft, no
+#     tag creation, no manifest rewrite. Existing Linux assets are never
+#     touched.
+#   - Every artifact gets a .sha256 that the installers verify before
+#     executing anything.
+
+on:
+  workflow_dispatch:
+    inputs:
+      confirm_tag:
+        description: 'Type v1.4.0 to confirm the exact tag to build from'
+        required: true
+        default: 'v1.4.0'
+
+permissions:
+  contents: write
+
+env:
+  NODE_VERSION: '20'
+  NODE_BUNDLE_VERSION: '20.18.0'
+  TAG: v1.4.0
+  VERSION_NUM: '1.4.0'
+  OVERLAY_DIR: scripts/platform-overlay/v1.4.0
+
+jobs:
+  build-macos:
+    name: macOS artifacts (aarch64 + x86_64)
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: macos-14          # Apple Silicon runner
+            target: aarch64-apple-darwin
+            arch: aarch64
+          - os: macos-13          # Intel runner
+            target: x86_64-apple-darwin
+            arch: x64
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 60
+    steps:
+      - name: Checkout the EXACT v1.4.0 tag
+        uses: actions/checkout@v4
+        with:
+          ref: refs/tags/v1.4.0
+          persist-credentials: false
+
+      # The overlay pack lives on main, NOT in the v1.4.0 tag tree — fetch
+      # it separately and stage it into the working tree so every later
+      # step can reference $OVERLAY_DIR unchanged.
+      - name: Fetch the platform overlay pack from main
+        uses: actions/checkout@v4
+        with:
+          ref: main
+          path: overlay-main
+          persist-credentials: false
+
+      - name: Stage the overlay into the tag checkout
+        shell: bash
+        run: |
+          mkdir -p "$OVERLAY_DIR"
+          cp -r overlay-main/"$OVERLAY_DIR"/. "$OVERLAY_DIR"/
+          ls -la "$OVERLAY_DIR"
+          test -f "$OVERLAY_DIR/lib.rs.patch"
+
+      - name: Gate — require the confirm input to name the exact tag
+        shell: bash
+        run: |
+          [ "${{ github.event.inputs.confirm_tag }}" = "v1.4.0" ] || {
+            echo "FATAL: confirm_tag must be exactly v1.4.0 (got '${{ github.event.inputs.confirm_tag }}')"; exit 1; }
+
+      - name: Verify we are on the v1.4.0 tag commit
+        shell: bash
+        run: |
+          echo "HEAD: $(git rev-parse HEAD)"
+          echo "Tag : $(git rev-parse refs/tags/v1.4.0^{commit})"
+          [ "$(git rev-parse HEAD)" = "$(git rev-parse refs/tags/v1.4.0^{commit})" ] || {
+            echo "FATAL: HEAD is not the v1.4.0 tag commit"; exit 1; }
+
+      - name: Apply the platform overlay patch (node path probe)
+        shell: bash
+        run: git apply "$OVERLAY_DIR/lib.rs.patch" && echo "Overlay patch applied cleanly"
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+
+      - name: Install Rust target
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.target }}
+
+      - name: Download and bundle Node.js runtime
+        shell: bash
+        run: |
+          case "${{ matrix.arch }}" in
+            aarch64) NODE_ARCH="darwin-arm64" ;;
+            x64)     NODE_ARCH="darwin-x64" ;;
+          esac
+          NODE_URL="https://nodejs.org/dist/v${NODE_BUNDLE_VERSION}/node-v${NODE_BUNDLE_VERSION}-${NODE_ARCH}.tar.gz"
+          mkdir -p blaxin/resources/node
+          curl -fsSL "$NODE_URL" | tar xz --strip-components=1 -C blaxin/resources/node
+          blaxin/resources/node/bin/node --version
+
+      - name: Install server dependencies and build
+        working-directory: blaxin/server
+        run: |
+          npm ci
+          npm run build
+
+      - name: Prepare bundled server resources
+        run: |
+          rm -rf blaxin/resources/blaxin-server
+          mkdir -p blaxin/resources/blaxin-server/dist
+          cp -r blaxin/server/dist/* blaxin/resources/blaxin-server/dist/
+          cp blaxin/server/package.json blaxin/resources/blaxin-server/
+          cd blaxin/resources/blaxin-server
+          npm install --omit=dev
+
+      - name: Install client dependencies and build
+        working-directory: blaxin/client
+        run: |
+          npm ci
+          npm run build
+
+      - name: Install Tauri CLI
+        run: cargo install tauri-cli --locked
+
+      - name: Generate full iconset (icon.icns + RGBA PNGs) from icon.png
+        working-directory: blaxin
+        shell: bash
+        run: |
+          export PATH="$HOME/.cargo/bin:$PATH"
+          # cargo tauri icon generates the complete macOS/Windows/Linux
+          # iconset (icon.icns, icon.ico, 8-bit RGBA PNGs) from the 512x512
+          # source icon — replacing the old sips-only conversion, and
+          # providing the .ico the Windows NSIS bundler requires.
+          cd src-tauri
+          cargo tauri icon icons/icon.png
+          test -f icons/icon.icns && test -f icons/icon.ico && echo "Iconset generated"
+
+      - name: Build Tauri app (dmg) with updater signing
+        working-directory: blaxin
+        env:
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+        run: |
+          export PATH="$HOME/.cargo/bin:$PATH"
+          cd src-tauri
+          cargo tauri build \
+            --target ${{ matrix.target }} \
+            --config ../../$OVERLAY_DIR/tauri.macos.conf.json \
+            --bundles dmg 2>&1
+          cd ..
+
+      - name: Organize artifacts
+        run: |
+          mkdir -p artifacts
+          BUNDLE="blaxin/src-tauri/target/${{ matrix.target }}/release/bundle"
+          DMG=$(find "$BUNDLE/dmg" -name '*.dmg' | head -1)
+          [ -n "$DMG" ] || { echo "No dmg produced"; find blaxin/src-tauri/target -name '*.dmg' -o -name '*.app' | head; exit 1; }
+          cp "$DMG" "artifacts/BLAXIN_${VERSION_NUM}_macOS_${{ matrix.arch }}.dmg"
+          SIG=$(find "$BUNDLE/dmg" -name '*.sig' | head -1)
+          if [ -n "$SIG" ] && [ -s "$SIG" ]; then
+            cp "$SIG" "artifacts/BLAXIN_${VERSION_NUM}_macOS_${{ matrix.arch }}.dmg.sig"
+            echo "Updater signature present"
+          else
+            echo "No updater signature (createUpdaterArtifacts overlay) — continuing"
+          fi
+
+      - name: Generate SHA-256 checksums
+        working-directory: artifacts
+        run: |
+          for f in *.dmg; do
+            shasum -a 256 "$f" > "$f.sha256"
+            cat "$f.sha256"
+          done
+
+      - name: Upload build artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: blaxin-macos-${{ matrix.arch }}
+          path: artifacts/*
+          retention-days: 30
+          if-no-files-found: error
+
+  build-windows:
+    name: Windows artifact (x86_64 NSIS)
+    runs-on: windows-2022
+    timeout-minutes: 60
+    steps:
+      - name: Checkout the EXACT v1.4.0 tag
+        uses: actions/checkout@v4
+        with:
+          ref: refs/tags/v1.4.0
+          persist-credentials: false
+
+      # The overlay pack lives on main, NOT in the v1.4.0 tag tree — fetch
+      # it separately and stage it into the working tree so every later
+      # step can reference $OVERLAY_DIR unchanged.
+      - name: Fetch the platform overlay pack from main
+        uses: actions/checkout@v4
+        with:
+          ref: main
+          path: overlay-main
+          persist-credentials: false
+
+      - name: Stage the overlay into the tag checkout
+        shell: bash
+        run: |
+          mkdir -p "$OVERLAY_DIR"
+          cp -r overlay-main/"$OVERLAY_DIR"/. "$OVERLAY_DIR"/
+          ls -la "$OVERLAY_DIR"
+          test -f "$OVERLAY_DIR/lib.rs.patch"
+
+      - name: Gate — require the confirm input to name the exact tag
+        shell: bash
+        run: |
+          [ "${{ github.event.inputs.confirm_tag }}" = "v1.4.0" ] || {
+            echo "FATAL: confirm_tag must be exactly v1.4.0 (got '${{ github.event.inputs.confirm_tag }}')"; exit 1; }
+
+      - name: Verify we are on the v1.4.0 tag commit
+        shell: bash
+        run: |
+          echo "HEAD: $(git rev-parse HEAD)"
+          [ "$(git rev-parse HEAD)" = "$(git rev-parse refs/tags/v1.4.0^{commit})" ] || {
+            echo "FATAL: HEAD is not the v1.4.0 tag commit"; exit 1; }
+
+      - name: Apply the platform overlay patch (node path probe)
+        shell: bash
+        run: git apply "$OVERLAY_DIR/lib.rs.patch" && echo "Overlay patch applied cleanly"
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Download and bundle Node.js runtime
+        shell: pwsh
+        run: |
+          $NodeUrl = "https://nodejs.org/dist/v${env:NODE_BUNDLE_VERSION}/node-v${env:NODE_BUNDLE_VERSION}-win-x64.zip"
+          Invoke-WebRequest -Uri $NodeUrl -OutFile node.zip
+          Expand-Archive -Path node.zip -DestinationPath node-tmp
+          $src = "node-tmp/node-v${env:NODE_BUNDLE_VERSION}-win-x64/node.exe"
+          & $src --version
+          # The frozen Tauri resource map ships the runtime as
+          # node/bin/node on EVERY OS; the lib.rs overlay probes node.exe
+          # first, then node. A PE binary named `node` executes fine via
+          # CreateProcessW (exact-name-first). One layout for all OSes.
+          New-Item -ItemType Directory -Force -Path blaxin/resources/node/bin | Out-Null
+          Copy-Item $src blaxin/resources/node/bin/node -Force
+          $copied = Get-Item blaxin/resources/node/bin/node
+          Write-Host "Bundled node: $($copied.FullName) ($([math]::Round($copied.Length/1MB,1)) MB)"
+          if ($copied.Length -lt 10MB) { throw "Bundled node copy is too small — aborting" }
+
+      - name: Install server dependencies and build
+        working-directory: blaxin/server
+        run: |
+          npm ci
+          npm run build
+
+      - name: Prepare bundled server resources
+        run: |
+          rm -rf blaxin/resources/blaxin-server
+          mkdir -p blaxin/resources/blaxin-server/dist
+          cp -r blaxin/server/dist/* blaxin/resources/blaxin-server/dist/
+          cp blaxin/server/package.json blaxin/resources/blaxin-server/
+          cd blaxin/resources/blaxin-server
+          npm install --omit=dev
+        shell: bash
+
+      - name: Install client dependencies and build
+        working-directory: blaxin/client
+        run: |
+          npm ci
+          npm run build
+
+      - name: Install Tauri CLI
+        run: cargo install tauri-cli --locked
+
+      - name: Generate full iconset (icon.ico required by the NSIS bundler)
+        working-directory: blaxin
+        shell: bash
+        run: |
+          export PATH="$HOME/.cargo/bin:$PATH"
+          cd src-tauri
+          cargo tauri icon icons/icon.png
+          test -f icons/icon.ico && test -f icons/icon.icns && echo "Iconset generated"
+
+      - name: Build Tauri app (NSIS installer)
+        working-directory: blaxin
+        run: |
+          export PATH="$HOME/.cargo/bin:$PATH"
+          cd src-tauri
+          cargo tauri build --config ../../$OVERLAY_DIR/tauri.windows.conf.json --bundles nsis 2>&1
+          cd ..
+        shell: bash
+
+      - name: Organize artifacts
+        shell: bash
+        run: |
+          mkdir -p artifacts
+          BUNDLE="blaxin/src-tauri/target/release/bundle"
+          SETUP=$(find "$BUNDLE/nsis" -name '*.exe' | head -1)
+          [ -n "$SETUP" ] || { echo "No NSIS installer produced"; find blaxin/src-tauri/target -name '*.exe' | head; exit 1; }
+          cp "$SETUP" "artifacts/BLAXIN_${VERSION_NUM}_Windows_x64-setup.exe"
+
+      - name: Generate SHA-256 checksum
+        shell: pwsh
+        run: |
+          $exe = Get-ChildItem artifacts/*.exe | Select-Object -First 1
+          $hash = (Get-FileHash -Algorithm SHA256 $exe.FullName).Hash.ToLower()
+          "$hash  $($exe.Name)" | Out-File -FilePath "$($exe.FullName).sha256" -Encoding ascii
+          Get-Content "$($exe.FullName).sha256"
+
+      - name: Upload build artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: blaxin-windows-x64
+          path: artifacts/*
+          retention-days: 30
+          if-no-files-found: error
+
+  attach-to-existing-release:
+    name: Attach artifacts to the existing v1.4.0 release
+    needs: [build-macos, build-windows]
+    runs-on: ubuntu-latest
+    steps:
+      - name: Download all build artifacts
+        uses: actions/download-artifact@v4
+        with:
+          merge-multiple: true
+          path: artifacts/
+
+      - name: List artifacts
+        run: ls -la artifacts/
+
+      - name: Verify every artifact has a checksum
+        run: |
+          cd artifacts
+          FAIL=0
+          for f in *.dmg *.exe; do
+            [ -f "$f" ] || continue
+            if [ ! -f "$f.sha256" ]; then
+              echo "ERROR: missing checksum for $f"; FAIL=1
+            fi
+          done
+          exit $FAIL
+
+      - name: Attach to the EXISTING v1.4.0 release (upload only)
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          # Upload each asset to the EXISTING release identified by tag
+          # v1.4.0. No release creation, no tag creation, no manifest write.
+          RELEASE_ID=$(gh api "repos/${{ github.repository }}/releases/tags/v1.4.0" --jq '.id')
+          echo "Existing v1.4.0 release id: $RELEASE_ID"
+          for f in artifacts/*; do
+            NAME=$(basename "$f")
+            # Skip an asset that already exists on the release (idempotent re-runs)
+            if gh api "repos/${{ github.repository }}/releases/$RELEASE_ID/assets?per_page=100" --jq '.[].name' | grep -qx "$NAME"; then
+              echo "Asset already on release, skipping: $NAME"
+              continue
+            fi
+            echo "Uploading: $NAME"
+            gh api \
+              --method POST \
+              --header "Content-Type: application/octet-stream" \
+              "https://uploads.github.com/repos/${{ github.repository }}/releases/$RELEASE_ID/assets?name=$NAME" \
+              --input "$f" >/dev/null && echo "  uploaded"
+          done

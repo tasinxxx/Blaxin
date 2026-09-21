@@ -26,11 +26,23 @@ struct AppState {
 /// In production, this is at <resource_dir>/node/bin/node.
 /// In dev mode, fall back to system node.
 fn find_bundled_node(resource_dir: &Path) -> Option<String> {
-    // Try bundled node first (production build)
-    let bundled = resource_dir.join("node").join("bin").join("node");
-    if bundled.exists() {
-        eprintln!("[BLAXIN] Using bundled node: {:?}", bundled);
-        return Some(bundled.to_string_lossy().to_string());
+    // Try bundled node first (production build). The bundle layout differs
+    // per OS and both spellings are probed so one source tree serves all
+    // platforms (Linux/macOS keep the exact same path as before):
+    //   Linux/macOS: <resources>/node/bin/node
+    //   Windows:     <resources>/node/bin/node.exe
+    let bin_dir = resource_dir.join("node").join("bin");
+    let candidates: [&str; 2] = if cfg!(windows) {
+        ["node.exe", "node"]
+    } else {
+        ["node", "node.exe"]
+    };
+    for name in candidates {
+        let bundled = bin_dir.join(name);
+        if bundled.exists() {
+            eprintln!("[BLAXIN] Using bundled node: {:?}", bundled);
+            return Some(bundled.to_string_lossy().to_string());
+        }
     }
     None
 }

@@ -4,6 +4,7 @@ import { promisify } from 'util';
 import { readFileSync, existsSync, unlinkSync, statSync, writeFileSync } from 'fs';
 import { join } from 'path';
 import { tmpdir } from 'os';
+import { screenshotTools, windowsScreenshotScript } from '../utils/platform.js';
 
 const execFileAsync = promisify(execFile);
 
@@ -52,24 +53,17 @@ export class ScreenshotTool implements Tool {
     const screenshotPath = join(tmpdir(), `blaxin-screenshot-${Date.now()}.png`);
 
     try {
-      // Try different screenshot tools based on what's available
-      const tools = [
-        {
-          name: 'scrot',
-          cmd: 'scrot',
-          args: [screenshotPath],
-        },
-        {
-          name: 'gnome-screenshot',
-          cmd: 'gnome-screenshot',
-          args: ['-f', screenshotPath],
-        },
-        {
-          name: 'import',
-          cmd: 'import',
-          args: ['-window', 'root', screenshotPath],
-        },
-      ];
+      // Per-platform capture chain from the platform module (Linux order is
+      // the frozen v1.4.0 contract: scrot → gnome-screenshot → import).
+      const tools = screenshotTools().map((t) => ({
+        name: t.name,
+        cmd: t.cmd,
+        // Windows supplies the full -Command script (encoded path inside);
+        // every other tool takes the destination path as its last argument.
+        args: t.cmd === 'powershell.exe'
+          ? ['-Command', windowsScreenshotScript(screenshotPath)]
+          : [...t.args, screenshotPath],
+      }));
 
       let captured = false;
       for (const tool of tools) {

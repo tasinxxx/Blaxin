@@ -1,0 +1,20 @@
+{
+  "bundle": {
+    "targets": ["dmg", "app"],
+    "createUpdaterArtifacts": true,
+    "macOS": {
+      "minimumSystemVersion": "10.15"
+    }
+  },
+  "plugins": {
+    "updater": {
+      "endpoints": [
+        "https://raw.githubusercontent.com/tasinxxx/Blaxin/main/blaxin/update/latest.json"
+      ],
+      "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IDNCOUFBREM3MzJFOUUwQUEKUldTcTRPa3l4NjJhTzRXeDJZc0sydkxMOC9JYnQ5UWJPdi9HUnp6VXRNY1ZlQ3ZVL0s4QktWZW8K",
+      "windows": {
+        "title": "BLAXIN Updater"
+      }
+    }
+  }
+}

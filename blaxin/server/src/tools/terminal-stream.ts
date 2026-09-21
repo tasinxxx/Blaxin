@@ -1,6 +1,7 @@
 import { WebSocket } from 'ws';
 import { spawn, ChildProcess } from 'child_process';
 import { logger } from '../utils/logger.js';
+import { defaultShell, defaultCwd } from '../utils/platform.js';
 
 interface TerminalSession {
   id: string;
@@ -42,9 +43,10 @@ export function handleTerminalWebSocket(ws: WebSocket): void {
   
   logger.info('terminal-ws', `New terminal session: ${sessionId}`);
 
-  // Start a shell process
-  const shell = process.env.SHELL || '/bin/bash';
-  const cwd = process.env.HOME || '/tmp';
+  // Start a shell process (platform-aware: $SHELL//bin/bash on unix,
+  // PowerShell/cmd on Windows).
+  const shell = defaultShell();
+  const cwd = defaultCwd();
   
   const child = spawn(shell, [], {
     cwd,
