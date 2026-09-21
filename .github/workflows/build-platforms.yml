@@ -39,14 +39,14 @@ jobs:
     name: macOS artifacts (aarch64 + x86_64)
     strategy:
       fail-fast: false
-    matrix:
-      include:
-        - os: macos-14          # Apple Silicon runner
-          target: aarch64-apple-darwin
-          arch: aarch64
-        - os: macos-14          # Intel artifact is CROSS-COMPILED on Apple
-          target: x86_64-apple-darwin   # Silicon: the macos-13 (Intel) runner
-          arch: x64                     # image was retired by GitHub on
+      matrix:
+        include:
+          - os: macos-14        # Apple Silicon runner
+            target: aarch64-apple-darwin
+            arch: aarch64
+          - os: macos-14        # Intel artifact is CROSS-COMPILED on Apple
+            target: x86_64-apple-darwin # Silicon: the macos-13 (Intel) runner
+            arch: x64                   # image was retired by GitHub on
                                         # 2025-12-04, and rustc cross-compiles
                                         # between macOS architectures natively.
     runs-on: ${{ matrix.os }}
