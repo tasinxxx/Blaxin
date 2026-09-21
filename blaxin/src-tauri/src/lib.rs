@@ -542,6 +542,11 @@ fn ignore_sighup() {
     }
 }
 
+/// Windows has no SIGHUP (the unix definition above is cfg'd out); provide a
+/// no-op so the unconditional call site in run() compiles on every platform.
+#[cfg(not(unix))]
+fn ignore_sighup() {}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     ignore_sighup();

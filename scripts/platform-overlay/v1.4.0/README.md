@@ -10,7 +10,7 @@ Release, next to the original Linux artifacts.
 
 | File | Purpose |
 |---|---|
-| `lib.rs.patch` | The only source delta needed: `find_bundled_node` probes `node.exe` on Windows in addition to the original `node` path. Applies cleanly to the v1.4.0 tag (verified with `git apply --check`). |
+| `lib.rs.patch` | The only source delta needed: (1) `find_bundled_node` probes `node.exe` on Windows in addition to the original `node` path; (2) a `#[cfg(not(unix))]` no-op `ignore_sighup()` so the unconditional call site in `run()` compiles on Windows. Applies cleanly to the v1.4.0 tag (verified with `git apply --check`). |
 | `tauri.macos.conf.json` | Tauri CLI config overlay for macOS builds: adds the `dmg` + `app` bundle targets, updater endpoints/public key, and `minimumSystemVersion` 10.15. Overlaid with `--config`; `tauri.conf.json` in the tag is never modified. |
 | `tauri.windows.conf.json` | Tauri CLI config overlay for Windows builds: NSIS target (per-user install, bundled WebView2 bootstrapper). Updater artifacts are intentionally disabled (`createUpdaterArtifacts: false`) until signed Windows artifacts are wired into `latest.json` — the manifest currently declares Linux platforms only, and no unverified update path is enabled. |
 
@@ -21,7 +21,8 @@ Release, next to the original Linux artifacts.
 - `build.rs` and `lock.rs` are already cross-platform (`pid_alive` is
   `cfg`-guarded; the data dir resolution has a `HOME`/temp fallback).
 - `terminate_server` / process-group handling are `#[cfg(unix)]` guarded with
-  a working non-unix fallback (`kill` + `wait`).
+  a working non-unix fallback (`kill` + `wait`), and the SIGHUP suppression
+  in `lib.rs` now has a matching non-unix no-op.
 - On Linux, the overlay is a no-op: CI builds the AppImage/deb exactly as
   `release.yml` did for v1.4.0, and the patch's non-Windows candidate order
   keeps the original `node` path first.
