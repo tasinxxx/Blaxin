@@ -257,7 +257,16 @@ jobs:
           }
           $path = "$env:OVERLAY_DIR/tauri.windows.conf.json"
           $conf = Get-Content $path -Raw | ConvertFrom-Json
-          $conf.build.beforeBuildCommand = "bash `"$guard`""
+          # NO quotes around $guard: tauri-cli v2 executes beforeBuildCommand
+          # through `powershell -Command` on Windows, and the quote characters
+          # are mangled on the way to bash (run 35591654583: bash received the
+          # single token `\D:/...sh"` and exited 127). GitHub runner workspaces
+          # are space-free, so the unquoted absolute path survives every layer.
+          # Fail closed if a spaceful path ever makes quoting unavoidable.
+          if ($guard -match '\s') {
+            throw "guard path contains whitespace ('$guard') and cannot be passed unquoted through the PowerShell hook layer"
+          }
+          $conf.build.beforeBuildCommand = "bash $guard"
           ($conf | ConvertTo-Json -Depth 10) | Set-Content $path -Encoding utf8
           Write-Host "beforeBuildCommand pinned to: $($conf.build.beforeBuildCommand)"
 
